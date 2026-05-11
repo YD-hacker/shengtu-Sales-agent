@@ -108,22 +108,15 @@ def get_objection_strategy(intent: str, state: dict, lead_score: int) -> dict:
             "escalate": False,
         }
     else:
-        # 第三次出现：真诚模式
+        # 第三次及以后：真诚模式
         strategy = {
             "mode": "direct_mode",
             "use_llm": True,
             "escalate": False,
         }
-    else:
-        # 超过最大轮数：考虑转人工或放弃
-        strategy = {
-            "mode": "escalate",
-            "use_llm": False,
-            "escalate": True,
-        }
 
-    strategy["round"] = count + 1
-    strategy["max_rounds"] = max_rounds
+    strategy["round"] = type_count + 1
+    strategy["max_rounds"] = max_total
     return strategy
 
 
