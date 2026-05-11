@@ -13,6 +13,7 @@ from loguru import logger
 
 # ---- 意图优先级（数值越大优先级越高）----
 INTENT_PRIORITY = {
+    "insult": 110,
     "user_frustration": 100,
     "request_human": 95,
     "correct_info": 90,
@@ -35,6 +36,12 @@ INTENT_PRIORITY = {
 
 # ---- 正则快速匹配规则 ----
 REGEX_RULES = [
+    # 辱骂/脏话（最高优先级）
+    {
+        "pattern": r"(滚|他妈|你妈|卧槽|草|操|fuck|shit|sb|傻逼|煞笔|狗屁|放屁|混蛋|王八蛋|去死|垃圾|废物|骗[子砸]|骗子|忽悠|割韭菜|坑人)",
+        "intent": "insult",
+        "confidence": 0.95,
+    },
     # 情绪优先
     {
         "pattern": r"(说了.*遍|又说|重复|问过|烦不烦|够了|没听清|这些我都)",
@@ -269,6 +276,15 @@ def classify(msg: str, current_state: str = "", collected_slots: dict = None) ->
 
     # 第一层：正则快速匹配
     regex_intent, regex_confidence = _regex_classify(msg)
+
+    # 模糊确认降级：短消息+confirm+关键阶段 → 降低置信度
+    # 防止"嗯""好的"等模糊回复导致状态自嗨式推进
+    if regex_intent == "confirm" and current_state in ("qualify", "icebreak"):
+        if len(msg) <= 3 and regex_confidence < 0.95:
+            # 非常短的确认词，在关键阶段不直接推进状态
+            regex_intent = "normal"
+            regex_confidence = 0.5
+            logger.info(f"  -> 模糊确认降级: confirm -> normal (state={current_state})")
 
     # 如果正则置信度高，直接返回
     if regex_confidence >= 0.8:

@@ -270,4 +270,12 @@ def start_scheduler():
     )
 
     scheduler.start()
+
+    # 恢复未执行的挽回任务
+    try:
+        from code.recovery_engine import restore_pending_recoveries
+        restore_pending_recoveries()
+    except Exception as e:
+        logger.warning(f"恢复挽回任务失败: {e}")
+
     logger.info("调度器已启动（唤醒+试听跟进+关系管理+信任衰减+周五问候）")

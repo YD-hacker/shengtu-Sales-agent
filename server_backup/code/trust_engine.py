@@ -52,7 +52,7 @@ def init_trust(state):
 def adjust_trust(state, action: str, reason: str = "") -> int:
     """
     调整信任值
-    防刷机制: 每日加分上限 20 分
+    防刷机制: 每日加分上限 15 分，单动作类型每日上限 10 分
     """
     from code.time_utils import get_beijing_time
 
@@ -71,14 +71,23 @@ def adjust_trust(state, action: str, reason: str = "") -> int:
     delta = trust_score_map.get(action, 0)
     old = state.get("trust_level", TRUST_INITIAL)
 
-    DAILY_POSITIVE_CAP = 20
+    DAILY_POSITIVE_CAP = 15
+    PER_ACTION_CAP = 10  # 单动作类型每日上限
     if delta > 0:
         today = get_beijing_time().strftime("%Y-%m-%d")
         last_date = state.get("last_positive_date", "")
         if last_date != today:
             state["daily_positive_total"] = 0
+            state["_daily_action_totals"] = {}
             state["last_positive_date"] = today
         current_positive = state.get("daily_positive_total", 0)
+
+        # 单动作类型防刷检查
+        action_totals = state.get("_daily_action_totals", {})
+        action_total = action_totals.get(action, 0)
+        if action_total >= PER_ACTION_CAP:
+            logger.info(f"信任单动作加分达上限({PER_ACTION_CAP}): {action}")
+            return old
         if current_positive >= DAILY_POSITIVE_CAP:
             logger.info(f"信任加分达上限({DAILY_POSITIVE_CAP})，跳过: {action}")
             return old
@@ -86,6 +95,9 @@ def adjust_trust(state, action: str, reason: str = "") -> int:
         if delta > remaining:
             delta = remaining
         state["daily_positive_total"] = current_positive + delta
+        # 更新单动作计数
+        action_totals[action] = action_totals.get(action, 0) + delta
+        state["_daily_action_totals"] = action_totals
 
     new = max(TRUST_MIN, min(TRUST_MAX, old + delta))
     state["trust_level"] = new

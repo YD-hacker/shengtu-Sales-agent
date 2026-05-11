@@ -41,6 +41,15 @@ KNOWLEDGE_ADJACENT_PATTERNS = [
     re.compile(r"(宿舍|住宿|伙食|环境).{0,5}(怎么样|条件|几人)"),
     # 面试/考核
     re.compile(r"(面试|考核|笔试|机试).{0,5}(什么|怎样|难吗)"),
+    # 退费相关
+    re.compile(r"(退费|退款|退钱|不学了|不想学了|中途退出|怎么退|能退|退多少|到账)"),
+    re.compile(r"(找不到工作|学完没就业|没效果).{0,5}(退|赔|返)"),
+    # 隐私相关
+    re.compile(r"(隐私|个人信息|数据安全|信息泄露|怎么保存|隐私政策|数据保护)"),
+    re.compile(r"(电话|手机号|信息).{0,5}(泄露|安全|保存|保护)"),
+    # 投诉相关
+    re.compile(r"(投诉|举报|维权|12315|消协|工商|市场监管)"),
+    re.compile(r"(不满意|服务差|态度差|不负责).{0,5}(投诉|举报)"),
 ]
 
 # ---- 第二层护栏规则 ----
@@ -50,6 +59,9 @@ LAYER2_RULES = [
     "不能贬低竞争对手（不提竞品名字，只说'传统培训机构'）",
     "回答必须基于事实，不确定的要说'具体你可以来校区了解'",
     "回答后必须自然过渡到业务主线",
+    "退费相关：强调'不就业不收费'的合同条款，引导来校区看合同原文，不承诺具体退费比例",
+    "隐私相关：承诺信息仅用于实训安排，不会泄露给第三方，具体条款来校区查看",
+    "投诉相关：态度诚恳，表示重视，引导来校区当面沟通解决",
 ]
 
 
@@ -77,7 +89,7 @@ def classify_question_tier(msg: str, current_node: str, intent: str) -> str:
             if pattern.search(msg):
                 return "layer2"
                 # Company/institution info questions
-        if re.search(r"(公司.*在哪|地址|搜不到|查不到|官网|你们.*公司|公司.*全称|多少.*学员|就业.*率|有.*合同|保障.*条款|正规|靠谱|口碑|评价)", msg):
+        if re.search(r"(公司.*在哪|地址|搜不到|查不到|官网|你们.*公司|公司.*全称|多少.*学员|就业.*率|有.*合同|保障.*条款|正规|靠谱|口碑|评价|营业执照|资质)", msg):
             return "layer2"
         return "layer3"
 def get_layer2_system_prompt(msg: str, current_node: str, state: dict) -> str:
@@ -117,14 +129,25 @@ def get_layer2_system_prompt(msg: str, current_node: str, state: dict) -> str:
     return system_prompt
 
 
-def get_layer3_reply(current_node: str, state: dict) -> str:
+def get_layer3_reply(current_node: str, state: dict, msg: str = "") -> str:
     """
     第三层：礼貌兜底 + 进度引导
     拉回话术从KB读取
+    对严肃问题（退费/隐私/投诉）给出更有分量的回复
     """
     pullback_map = KB.get("pullback", {})
     default_pullback = "咱先把正事办了吧？"
     hint = pullback_map.get(current_node, default_pullback)
+
+    # 对严肃问题给出更有分量的回复
+    if msg:
+        msg_lower = msg.lower()
+        if any(w in msg_lower for w in ["退费", "退款", "退钱", "不学了", "怎么退"]):
+            return "这个问题很重要，合同里有明确的条款保障你的权益。线上不方便细说，你来校区我给你看合同原文，白纸黑字最靠谱。"
+        if any(w in msg_lower for w in ["隐私", "个人信息", "数据", "泄露"]):
+            return "你的信息安全我们非常重视，所有信息仅用于实训安排，不会泄露给第三方。具体的隐私保护条款，来校区我可以给你看。"
+        if any(w in msg_lower for w in ["投诉", "举报", "维权"]):
+            return "很抱歉给你带来了不好的体验，我们非常重视每一位学员的感受。你方便来校区当面聊聊吗？我一定给你一个满意的答复。"
 
     base = "这个我确实不太擅长聊😅"
     return f"{base} {hint}"

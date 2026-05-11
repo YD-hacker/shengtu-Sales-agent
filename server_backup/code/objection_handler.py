@@ -64,7 +64,7 @@ OBJECTION_ROOT_CAUSES = {
 
 
 async def generate_objection_response(intent, user_msg, state, history=None):
-    """让LLM动态生成异议回应"""
+    """让LLM动态生成异议回应，融合用户画像"""
     history = history or []
 
     pain_points = state.get("pain_points", [])
@@ -79,11 +79,33 @@ async def generate_objection_response(intent, user_msg, state, history=None):
     possible_causes = OBJECTION_ROOT_CAUSES.get(intent, ["未知顾虑"])
     causes_text = "、".join(possible_causes[:3])
 
-    # 获取用户画像
+    # 获取用户基础信息
     age = state.get("age", "未知")
     education = state.get("education", "未知")
     city = state.get("city", "未知")
     direction = state.get("direction", "网安")
+
+    # 获取深度用户画像
+    profile_context = ""
+    try:
+        from code.user_profiler import build_deep_profile, get_personalized_strategy
+        profile = build_deep_profile(state, history)
+        strategies = get_personalized_strategy(profile)
+        parts = []
+        if strategies.get("decision_style"):
+            style_map = {"decisive": "果断型，直接给方案", "hesitant": "犹豫型，多给案例降低风险",
+                         "analytical": "分析型，给数据和细节", "exploratory": "探索型，多引导"}
+            parts.append(f"决策风格: {style_map.get(strategies['decision_style'], strategies['decision_style'])}")
+        if strategies.get("economic_pressure"):
+            pressure_map = {"high": "经济压力大，强调零风险和分期", "medium": "有一定压力，强调性价比", "low": "压力小，可以推标准方案"}
+            parts.append(f"经济压力: {pressure_map.get(strategies['economic_pressure'], strategies['economic_pressure'])}")
+        if strategies.get("communication_style"):
+            comm_map = {"verbose": "话多型，回复可以简洁些", "concise": "简洁型，不要啰嗦", "normal": "正常沟通"}
+            parts.append(f"沟通风格: {comm_map.get(strategies['communication_style'], strategies['communication_style'])}")
+        if parts:
+            profile_context = "\n- " + "\n- ".join(parts)
+    except Exception as e:
+        logger.debug(f"异议处理获取用户画像失败: {e}")
 
     prompt = f"""你是小范，26岁的IT人才服务顾问。用户表达了顾虑：
 "{user_msg}"
@@ -96,8 +118,8 @@ async def generate_objection_response(intent, user_msg, state, history=None):
 - 痛点：{'、'.join(pain_points) if pain_points else '无'}
 - 线索等级：{lead_score}
 - 信任度：{trust}
-
-可能的顾虑原因：{causes_text}
+- 可能的顾虑原因：{causes_text}
+{profile_context}
 
 相似案例：
 {case_text}
@@ -117,6 +139,7 @@ async def generate_objection_response(intent, user_msg, state, history=None):
 5. 不要出现"培训""学费""保证""一定"等词
 6. 可以适当使用表情符号增加亲和力
 7. 先输出共情，再给方案，不要一上来就推销
+8. 根据用户画像调整沟通风格（果断型给方案、犹豫型给案例、分析型给数据）
 
 直接输出回复："""
 

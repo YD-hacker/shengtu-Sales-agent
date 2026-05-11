@@ -136,7 +136,7 @@ from code.human_collaboration import (
 
 try:
 
-    from code.memory_vector import add_memory as _vm_add_memory, search as _vm_search
+    from code.memory_vector import add_memory as _vm_add_memory, search as _vm_search, clear_user_memories as _vm_clear_user
 
     VECTOR_MEMORY_AVAILABLE = True
 
@@ -147,6 +147,8 @@ except ImportError:
     _vm_add_memory = None
 
     _vm_search = None
+
+    _vm_clear_user = None
 
 try:
 
@@ -626,9 +628,61 @@ async def generate_llm_decision(user_state, intent, collected_slots,
 
                                 pain_points, lead_score, history, current_node, msg):
 
-    """让LLM自主决策生成回复"""
+    """让LLM自主决策生成回复，支持工具调用"""
 
 
+
+    # 第一步：检查是否需要工具调用
+
+    tool_result = None
+
+    if TOOLS_AVAILABLE and _is_llm_available():
+
+        try:
+
+            tool_prompt = build_tool_prompt(msg, user_state)
+
+            tool_reply = ""
+
+            async for token in stream_llm(tool_prompt, 0.1, "main"):
+
+                if token:
+
+                    tool_reply += token
+
+            _on_llm_success()
+
+            tool_reply = tool_reply.strip()
+
+            # 解析工具调用
+
+            if tool_reply.startswith("{") and '"tool"' in tool_reply:
+
+                import json as _json
+
+                try:
+
+                    tool_call = _json.loads(tool_reply)
+
+                    if "tool" in tool_call:
+
+                        user_id = user_state.get("_user_id", "")
+
+                        tool_result = execute_tool(tool_call["tool"], tool_call.get("parameters", {}), user_id)
+
+                        logger.info(f"工具调用: {tool_call['tool']} -> {str(tool_result)[:100]}")
+
+                except Exception as te:
+
+                    logger.debug(f"工具调用解析失败: {te}")
+
+        except Exception as e:
+
+            logger.debug(f"工具决策失败: {e}")
+
+
+
+    # 第二步：构建决策prompt（含工具结果）
 
     prompt = build_decision_prompt(
 
@@ -637,6 +691,16 @@ async def generate_llm_decision(user_state, intent, collected_slots,
         pain_points, lead_score, history, current_node, msg
 
     )
+
+    # 如果有工具结果，追加到prompt中
+
+    if tool_result:
+
+        import json as _json_fmt
+
+        tool_context = f"\n\n【工具查询结果】\n{_json_fmt.dumps(tool_result, ensure_ascii=False)}\n请基于以上信息回复用户。"
+
+        prompt += tool_context
 
 
 
@@ -1024,6 +1088,64 @@ async def process_message_stream(user_id, msg):
 
 
 
+        # ---- 6.5 辱骂处理 ----
+
+        if intent == "insult":
+
+            state["_insult_count"] = state.get("_insult_count", 0) + 1
+
+            adjust_trust(state, "pushy_sales", "用户辱骂")
+
+            insult_count = state["_insult_count"]
+
+            logger.info(f"[{user_id}] 用户辱骂，第{insult_count}次")
+
+            if insult_count >= 2:
+
+                # 2次辱骂，转人工
+
+                from code.human_collaboration import build_handoff_context, format_handoff_message
+
+                context = build_handoff_context(state, new_lead_score)
+
+                handoff_msg = format_handoff_message(context)
+
+                from code.error_monitor import _send_alert
+
+                _send_alert("用户辱骂转人工", handoff_msg, "warning")
+
+                mark_user_human_active(user_id, "", 3)
+
+                save_state(user_id, state)
+
+                yield "我理解你现在情绪不太好，我这边帮你转接一下，稍等。"
+
+                add_history(user_id, msg, "我理解你现在情绪不太好，我这边帮你转接一下，稍等。")
+
+                _store_vector_memory(user_id, msg, "我理解你现在情绪不太好，我这边帮你转接一下，稍等。", state)
+
+                return
+
+            else:
+
+                # 第一次辱骂，给出有尊严的回应
+
+                insult_reply = "我理解你可能有些不满，但我确实是想帮你找到合适的方案。如果你现在不方便聊，随时找我都行。"
+
+                save_state(user_id, state)
+
+                yield insult_reply
+
+                add_history(user_id, msg, insult_reply)
+
+                _store_vector_memory(user_id, msg, insult_reply, state)
+
+                flush_if_needed()
+
+                return
+
+
+
         # ---- 7. 拒绝状态 ----
 
         if intent == "reject":
@@ -1145,6 +1267,26 @@ async def process_message_stream(user_id, msg):
 
             state["is_qualified"] = None
 
+            # 清除向量记忆中的矛盾数据
+
+            if VECTOR_MEMORY_AVAILABLE and _vm_clear_user:
+
+                try:
+
+                    cleared = _vm_clear_user(user_id)
+
+                    logger.info(f"[{user_id}] correct_info: 已清除{cleared}条向量记忆")
+
+                except Exception as e:
+
+                    logger.debug(f"清除向量记忆失败: {e}")
+
+            # 重置痛��（用户可能之前说了假的痛点）
+
+            state["pain_points"] = []
+
+            logger.info(f"[{user_id}] correct_info: 已重置is_qualified、pain_points、向量记忆")
+
 
 
         # ---- qualify phase: fee intent -> acknowledge + continue collecting ----
@@ -1240,7 +1382,7 @@ async def process_message_stream(user_id, msg):
 
             if not buffered_reply.strip():
 
-                buffered_reply = get_layer3_reply(old_state, state)
+                buffered_reply = get_layer3_reply(old_state, state, msg)
 
 
 

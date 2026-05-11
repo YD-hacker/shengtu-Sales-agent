@@ -53,7 +53,18 @@ async def generate_variant(template, intent, state=None):
         logger.warning(f"生成话术变体失败: {e}")
         return ""
 
-    return variant.strip()
+    variant = variant.strip()
+    if not variant:
+        return ""
+
+    # 合规检查：变体必须通过硬检查
+    from code.compliance_checker import hard_check
+    is_safe, safe_text = hard_check(variant, "icebreak", is_objection=False)
+    if not is_safe:
+        logger.warning(f"话术变体合规检查未通过，已拦截: {variant[:50]}...")
+        return ""
+
+    return variant
 
 
 async def auto_create_experiments(kb_scripts):
@@ -76,6 +87,14 @@ async def auto_create_experiments(kb_scripts):
         variant = await generate_variant(template, intent)
         if not variant:
             continue
+
+        # 二次合规检查（双重保险）
+        from code.compliance_checker import hard_check
+        is_safe, safe_variant = hard_check(variant, _get_stage_for_intent(intent), is_objection=intent.startswith("objection_"))
+        if not is_safe:
+            logger.warning(f"实验变体合规拦截: {intent} -> {variant[:50]}...")
+            continue
+        variant = safe_variant
 
         experiments[f"{intent}_variant"] = {
             "stage": _get_stage_for_intent(intent),

@@ -91,7 +91,7 @@ def should_attempt_recovery(state, intent, history):
         return {"should_recover": False, "reason": "超过最大拒绝次数"}
 
     # 检查挽回尝试次数
-    reason = analyze_rejection_reason(history)
+    reason = analyze_rejection_reason(history, state)
     strategy = RECOVERY_STRATEGIES.get(reason, RECOVERY_STRATEGIES["unknown"])
 
     if recovery_attempt >= strategy["max_attempts"]:
@@ -105,27 +105,45 @@ def should_attempt_recovery(state, intent, history):
     }
 
 
-def analyze_rejection_reason(history):
-    """分析拒绝原因"""
-    if not history:
-        return "unknown"
+def analyze_rejection_reason(history, state=None):
+    """分析拒绝原因，融合用户画像"""
+    # 关键词匹配
+    keyword_result = "unknown"
+    if history:
+        recent_msgs = [h.get("user", "") for h in history[-5:]]
+        for msg in recent_msgs:
+            msg_lower = msg.lower()
+            if any(w in msg_lower for w in ["贵", "没钱", "付不起", "太贵", "价格", "费用高"]):
+                keyword_result = "price"
+                break
+            elif any(w in msg_lower for w in ["远", "不方便", "外地", "距离"]):
+                keyword_result = "distance"
+                break
+            elif any(w in msg_lower for w in ["没时间", "忙", "走不开", "加班", "请假"]):
+                keyword_result = "time"
+                break
+            elif any(w in msg_lower for w in ["考虑", "想想", "再看看", "犹豫", "不急"]):
+                keyword_result = "hesitation"
+                break
+            elif any(w in msg_lower for w in ["骗", "不信任", "不靠谱", "怀疑", "假的"]):
+                keyword_result = "trust"
+                break
 
-    recent_msgs = [h.get("user", "") for h in history[-5:]]
+    # 如果关键词没匹配到，用画像辅助判断
+    if keyword_result == "unknown" and state:
+        try:
+            from code.user_profiler import build_deep_profile
+            profile = build_deep_profile(state, history or [])
+            if profile.get("economic_pressure") == "high":
+                keyword_result = "price"
+            elif profile.get("decision_style") == "hesitant":
+                keyword_result = "hesitation"
+            elif profile.get("emotional_state") == "frustrated":
+                keyword_result = "trust"
+        except Exception:
+            pass
 
-    for msg in recent_msgs:
-        msg_lower = msg.lower()
-        if any(w in msg_lower for w in ["贵", "没钱", "付不起", "太贵", "价格", "费用高"]):
-            return "price"
-        elif any(w in msg_lower for w in ["远", "不方便", "外地", "距离"]):
-            return "distance"
-        elif any(w in msg_lower for w in ["没时间", "忙", "走不开", "加班", "请假"]):
-            return "time"
-        elif any(w in msg_lower for w in ["考虑", "想想", "再看看", "犹豫", "不急"]):
-            return "hesitation"
-        elif any(w in msg_lower for w in ["骗", "不信任", "不靠谱", "怀疑", "假的"]):
-            return "trust"
-
-    return "unknown"
+    return keyword_result
 
 
 def get_recovery_hook(reason, state=None):
@@ -149,13 +167,23 @@ def get_recovery_delay(reason):
 
 
 def schedule_recovery(user_id, reason, state):
-    """调度挽回任务"""
+    """调度挽回任务，支持持久化（重启后恢复）"""
     try:
         from code.scheduler import scheduler
         from code.memory_manager import load_state, save_state
 
         delay_hours = get_recovery_delay(reason)
         hook = get_recovery_hook(reason, state)
+        run_time = get_beijing_time() + timedelta(hours=delay_hours)
+
+        # 持久化挽回任务信息到用户状态（用于重启后恢复）
+        state["_pending_recovery"] = {
+            "reason": reason,
+            "hook": hook,
+            "run_time": run_time.isoformat(),
+            "scheduled_at": get_beijing_time().isoformat()
+        }
+        save_state(user_id, state)
 
         def recovery_task():
             try:
@@ -164,6 +192,8 @@ def schedule_recovery(user_id, reason, state):
                 # 检查是否已经恢复对话或已完成
                 if current_state.get("current_node") == "completed":
                     logger.info(f"[{user_id}] 挽回取消：用户已完成")
+                    current_state.pop("_pending_recovery", None)
+                    save_state(user_id, current_state)
                     return
 
                 # 检查是否已有新对话
@@ -173,6 +203,8 @@ def schedule_recovery(user_id, reason, state):
                         last_time = datetime.fromisoformat(last_active)
                         if (get_beijing_time() - last_time).total_seconds() < 3600:
                             logger.info(f"[{user_id}] 挽回取消：用户最近活跃")
+                            current_state.pop("_pending_recovery", None)
+                            save_state(user_id, current_state)
                             return
                     except Exception:
                         pass
@@ -181,6 +213,7 @@ def schedule_recovery(user_id, reason, state):
                 current_state["_recovery_attempt"] = current_state.get("_recovery_attempt", 0) + 1
                 current_state["_last_recovery_time"] = get_beijing_time().isoformat()
                 current_state["_recovery_reason"] = reason
+                current_state.pop("_pending_recovery", None)
                 save_state(user_id, current_state)
 
                 # 推送挽回消息（通过企微通道）
@@ -195,7 +228,6 @@ def schedule_recovery(user_id, reason, state):
                 logger.error(f"挽回任务执行失败: {e}")
 
         # 调度延迟任务
-        run_time = get_beijing_time() + timedelta(hours=delay_hours)
         scheduler.add_job(
             recovery_task,
             'date',
@@ -210,6 +242,44 @@ def schedule_recovery(user_id, reason, state):
     except Exception as e:
         logger.error(f"调度挽回任务失败: {e}")
         return False
+
+
+def restore_pending_recoveries():
+    """启动时恢复未执行的挽回任务"""
+    try:
+        from code.memory_manager import get_all_user_ids, load_state
+        user_ids = get_all_user_ids()
+        restored = 0
+        for uid in user_ids:
+            st = load_state(uid)
+            if not isinstance(st, dict):
+                continue
+            pending = st.get("_pending_recovery")
+            if not pending:
+                continue
+            run_time_str = pending.get("run_time")
+            if not run_time_str:
+                continue
+            try:
+                run_time = datetime.fromisoformat(run_time_str)
+                now = get_beijing_time()
+                if run_time > now:
+                    # 任务还未到执行时间，重新调度
+                    reason = pending.get("reason", "unknown")
+                    hook = pending.get("hook", "")
+                    schedule_recovery(uid, reason, st)
+                    restored += 1
+                else:
+                    # 任务已过期，清除
+                    st.pop("_pending_recovery", None)
+                    from code.memory_manager import save_state
+                    save_state(uid, st)
+            except Exception:
+                pass
+        if restored > 0:
+            logger.info(f"恢复了{restored}个未执行的挽回任务")
+    except Exception as e:
+        logger.error(f"恢复挽回任务失败: {e}")
 
 
 def get_recovery_stats(state):

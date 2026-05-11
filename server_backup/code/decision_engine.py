@@ -10,23 +10,38 @@ from code.time_utils import get_beijing_time
 # ---- 动态流程控制 ----
 
 def should_skip_steps(state: dict, lead_score: int, intent: str) -> str:
-    """判断是否可以跳过中间步骤，返回目标状态或None"""
+    """判断是否可以跳过中间步骤，返回目标状态或None
+
+    安全约束：跳步前必须满足：
+    1. 资格判定已完成（is_qualified 不为 None）
+    2. 核心槽位已填写（education + age）
+    3. 信任度达到阈值
+    """
     current = state.get("current_node", "icebreak")
     rounds = state.get("_conversation_rounds", 0)
+
+    # 基础安全检查：资格判定必须已完成
+    is_qualified = state.get("is_qualified")
+    has_education = bool(state.get("education", "").strip())
+    has_age = bool(state.get("age", "").strip())
+
+    # 跳步前置条件：至少有学历和年龄，且资格已判定
+    can_skip = has_education and has_age and (is_qualified is not None)
 
     # 高意向用户：跳过校区匹配，直接报价
     if (lead_score >= 80
             and current == "qualify"
             and state.get("_asked_fee", False)
-            and state.get("education", "")):
-        logger.info(f"决策引擎: 高意向用户(lead={lead_score})跳过match_campus到show_fee")
+            and can_skip):
+        logger.info(f"决策引擎: 高意向用户(lead={lead_score})跳过match_campus到show_fee, qualified={is_qualified}")
         return "show_fee"
 
-    # 极高意向用户：跳到邀约
+    # 极高意向用户：跳到邀约（必须已完成资格判定）
     if (lead_score >= 90
             and current in ("qualify", "match_campus")
-            and intent == "fee_intent"):
-        logger.info(f"决策引擎: 极高意向用户(lead={lead_score})跳到invite")
+            and intent == "fee_intent"
+            and can_skip):
+        logger.info(f"决策引擎: 极高意向用户(lead={lead_score})跳到invite, qualified={is_qualified}")
         return "invite"
 
     # 用户明确表示明天就想来
@@ -41,40 +56,58 @@ def should_skip_steps(state: dict, lead_score: int, intent: str) -> str:
 # ---- 动态异议策略 ----
 
 def get_objection_strategy(intent: str, state: dict, lead_score: int) -> dict:
-    """根据异议历史和线索等级选择处理策略"""
+    """根据异议历史和线索等级选择处理策略
+
+    同类型异议和总异议次数共同影响策略升级：
+    - 同类型异议2次 → 升级话术模式
+    - 总异议次数达到阈值 → 考虑转人工
+    """
     objection_key = f"_{intent}_count"
-    count = state.get(objection_key, 0)
+    type_count = state.get(objection_key, 0)
 
-    # 更新异议计数
-    state[objection_key] = count + 1
-    # Only track per-type, not total (different objections shouldn't compound)
-    state["_objection_total"] = state.get("_objection_total", 0)  # keep for analytics
+    # 更新单类型异议计数
+    state[objection_key] = type_count + 1
+    # 更新总异议计数（跨类型累计）
+    state["_objection_total"] = state.get("_objection_total", 0) + 1
+    total_count = state["_objection_total"]
 
-    # 根据线索等级获取最大异议轮数
+    # 根据线索等级获取最大总异议轮数
     if lead_score >= 80:
-        max_rounds = 5
+        max_total = 6
     elif lead_score >= 60:
-        max_rounds = 4
+        max_total = 5
     elif lead_score >= 40:
-        max_rounds = 3
+        max_total = 4
     else:
-        max_rounds = 3
+        max_total = 3
 
-    if count == 0:
+    # 总异议次数超限 → escalate
+    if total_count >= max_total:
+        strategy = {
+            "mode": "escalate",
+            "use_llm": False,
+            "escalate": True,
+            "round": total_count,
+            "max_rounds": max_total
+        }
+        return strategy
+
+    # 根据同类型次数选择模式
+    if type_count == 0:
         # 第一次出现：标准5步法
         strategy = {
             "mode": "standard_5step",
             "use_llm": lead_score >= 60,
             "escalate": False,
         }
-    elif count == 1:
+    elif type_count == 1:
         # 第二次出现：换一种话术
         strategy = {
             "mode": "alternative_script",
             "use_llm": lead_score >= 70,
             "escalate": False,
         }
-    elif count < max_rounds:
+    else:
         # 第三次出现：真诚模式
         strategy = {
             "mode": "direct_mode",
@@ -138,6 +171,10 @@ def can_advance_dynamic(state: dict, target_node: str, lead_score: int) -> bool:
 def should_end_conversation(state: dict, lead_score: int, conversation_rounds: int) -> tuple:
     """判断是否应该终止对话，返回 (should_end, reason)"""
 
+    # 硬上限：20轮对话必须终止（防止无限循环）
+    if conversation_rounds >= 20:
+        return True, "对话轮次硬上限"
+
     # 10轮对话后没有任何槽位更新
     slot_updates = state.get("_slot_update_count", 0)
     if conversation_rounds >= 10 and slot_updates == 0:
@@ -147,6 +184,11 @@ def should_end_conversation(state: dict, lead_score: int, conversation_rounds: i
     reject_count = state.get("_reject_count", 0)
     if reject_count >= 3:
         return True, "连续拒绝"
+
+    # 辱骂2次
+    insult_count = state.get("_insult_count", 0)
+    if insult_count >= 2:
+        return True, "用户辱骂"
 
     # C级用户 + 低信任 + 5轮以上
     if lead_score < 40 and state.get("trust_level", 50) < 30 and conversation_rounds >= 5:
