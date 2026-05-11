@@ -317,11 +317,14 @@ def upload_image(json_data=None):
 
 @app.route('/callback/wechat_work', methods=['GET', 'POST'])
 def wechat_work_callback():
-    if request.method == 'GET':
-        return "success"
-    msg_data = request.get_json(silent=True) or {}
-    logger.info(f"企业微信回调消息: {msg_data}")
-    return "success"
+    """企业微信自建应用回调入口"""
+    try:
+        from code.wechat_work import handle_callback_request
+        status_code, response = handle_callback_request(request)
+        return response, status_code
+    except Exception as e:
+        logger.error(f"企微回调处理异常: {e}")
+        return "success", 200
 
 
 @app.route('/callback/wechat_personal', methods=['GET', 'POST'])

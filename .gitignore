@@ -43,3 +43,14 @@ data/users/*.json
 # Temporary
 temp_grad.txt
 *.tmp
+
+# Sensitive files
+askpass.bat
+askpass.vbs
+*.bak
+*.bak2
+
+# User data
+server_backup/data/users/
+server_backup/data/analytics/
+server_backup/data/last_active.json

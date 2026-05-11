@@ -4,7 +4,7 @@
 
 ## 项目简介
 
-这是一个 **AI智能销售Agent**，通过微信/企业微信与潜在学员对话，自动完成客户筛选、资质判定、异议处理、邀约试听等销售全流程。系统采用"关键节点模板直出 + 非关键节点LLM自主决策"的分层架构，兼顾合规性与对话自然度。
+这是一个 **AI智能销售Agent**，通过企业微信与潜在学员对话，自动完成客户筛选、资质判定、异议处理、邀约试听等销售全流程。系统采用"关键节点模板直出 + 非关键节点LLM自主决策"的分层架构，兼顾合规性与对话自然度。
 
 ## 核心特性
 
@@ -20,12 +20,15 @@
 - **对话挽回引擎**：智能挽回策略，异步任务调度
 - **深度用户画像**：决策风格/经济压力/沟通风格多维分析
 - **工具调用能力**：LLM可查询用户信息、检查资格、匹配校区
+- **企微自建应用接入**：官方API双向对话，零封号风险
 
 ## 技术架构
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      Flask API Server                        │
+│                   企业微信 (用户侧入口)                       │
+├─────────────────────────────────────────────────────────────┤
+│              Flask API Server (8080端口)                      │
 ├─────────────────────────────────────────────────────────────┤
 │                    agent_core.py (核心调度)                   │
 ├──────────┬──────────┬──────────┬──────────┬─────────────────┤
@@ -43,8 +46,9 @@
 
 | 模块 | 功能 |
 |------|------|
-| `app.py` | Flask主服务，API路由、鉴权、限流 |
+| `app.py` | Flask主服务，API路由、鉴权、限流、企微回调 |
 | `code/agent_core.py` | 核心调度，消息处理主流程，工具调用集成 |
+| `code/wechat_work.py` | 企微自建应用接口（消息加解密、收发、转发Agent） |
 | `code/state_machine.py` | 严格状态机 + 资格判定 + 信任门禁 |
 | `code/intent_classifier.py` | 双层意图识别（正则 + LLM），含辱骂检测 |
 | `code/trust_engine.py` | 信任计算引擎（每日衰减，门禁控制，防刷机制） |
@@ -55,17 +59,69 @@
 | `code/user_profiler.py` | 深度用户画像（决策/沟通/经济/情绪） |
 | `code/objection_handler.py` | 动态异议处理（5步法 + 画像融合） |
 | `code/recovery_engine.py` | 对话挽回引擎（持久化任务，重启恢复） |
-| `code/experiment_manager.py` | A/B测试管理 |
 | `code/auto_experiment.py` | 自动话术变体生成（含合规检查） |
-| `code/human_collaboration.py` | 人工协作机制 |
 | `code/compliance_checker.py` | 合规检查（红线词过滤，身份澄清豁免） |
 | `code/guardrail.py` | 三层护栏系统（核心/知识/无关） |
 | `code/model_router.py` | LLM路由与熔断 |
-| `code/content_generator.py` | 内容生成（案例匹配、共情话术） |
-| `code/conversation_analytics.py` | 对话分析与埋点 |
+| `code/tools.py` | 工具调用模块（用户查询/资格检查/校区匹配） |
 | `code/analytics_dashboard.py` | 数据分析仪表盘（转化漏斗） |
 | `code/scheduler.py` | 任务调度器 |
-| `code/tools.py` | 工具调用模块（用户查询/资格检查/校区匹配） |
+
+## 企业微信接入
+
+### 接入方式
+
+使用**企微自建应用**（官方API，零封号风险，双向对话）。
+
+### 配置步骤
+
+1. **注册企业微信**：[work.weixin.qq.com](https://work.weixin.qq.com)（免费）
+
+2. **创建自建应用**：
+   - 管理后台 → 应用管理 → 自建 → 创建应用
+   - 记录 `AgentId`
+
+3. **获取企业ID和应用Secret**：
+   - 我的企业 → 企业ID（`corpid`）
+   - 应用管理 → 自建应用 → Secret
+
+4. **配置消息回调**：
+   - 应用管理 → 自建应用 → 接收消息 → 设置API接收
+   - URL: `http://你的服务器IP:8080/callback/wechat_work`
+   - 设置 `Token` 和 `EncodingAESKey`
+
+5. **填入配置**：
+   ```bash
+   # 编辑 /opt/ai-agent/.env
+   WECHAT_CORPID=你的企业ID
+   WECHAT_AGENTID=你的应用AgentId
+   WECHAT_CORPSECRET=你的应用Secret
+   WECHAT_TOKEN=回调设置中的Token
+   WECHAT_ENCODING_AES_KEY=回调设置中的EncodingAESKey
+   ```
+
+6. **重启服务**：
+   ```bash
+   systemctl restart ai-agent
+   ```
+
+7. **用户使用**：
+   - 用户在企微中搜索应用名称，添加为联系人
+   - 直接发消息即可开始对话
+
+### 回调接口
+
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/callback/wechat_work` | GET | 企微回调验证（echostr） |
+| `/callback/wechat_work` | POST | 接收用户消息，异步调用Agent处理并回复 |
+
+### 消息处理流程
+
+```
+用户发消息 → 企微推送回调 → 服务器接收 → 解密消息
+→ 调用Agent处理 → 加密回复 → 通过企微API发送给用户
+```
 
 ## 关键机制
 
@@ -108,42 +164,43 @@ trust >= 70 → 可以 report_info/completed
 | 接口 | 方法 | 说明 |
 |------|------|------|
 | `/health` | GET | 健康检查（含LLM/存储状态） |
-| `/test/chat` | POST | 流式对话接口（SSE） |
+| `/test/chat` | POST | 测试对话接口（SSE流式） |
+| `/callback/wechat_work` | GET/POST | 企微自建应用回调 |
 | `/upload/image` | POST | 图片信息提取 |
 | `/api/dashboard` | GET | 运营数据看板 |
 | `/api/user/<id>/score` | GET | 用户线索分查询 |
 | `/api/user/<id>/profile` | GET | 用户深度画像 |
 | `/api/experiments` | GET | A/B实验状态 |
 | `/api/analytics` | GET | 数据分析仪表盘 |
-| `/api/analytics/funnel` | GET | 转化漏斗 |
-| `/callback/wechat_work` | POST | 企业微信回调 |
 
 ## 快速开始
 
 ### 环境要求
 
 - Python 3.10+
-- 豆包API Key（或其他LLM服务）
+- 豆包API Key（火山引擎）
+- 企业微信自建应用
 
-### 安装依赖
+### 安装
 
 ```bash
+# 克隆代码
+git clone https://github.com/YD-hacker/shengtu-Sales-agent.git
+cd shengtu-Sales-agent
+
+# 安装依赖
 pip install -r requirements.txt
-```
 
-### 配置
-
-```bash
-# 复制配置模板
-cp server_backup/config/config.example.yaml server_backup/config/config.yaml
+# 配置环境变量
 cp server_backup/.env.example server_backup/.env
-
-# 编辑配置文件，填入实际的API Key和Token
+# 编辑 .env 填入 API Key 和企微配置
 ```
 
 ### 启动
 
 ```bash
+cd server_backup
+
 # 开发模式
 python app.py
 
@@ -151,40 +208,20 @@ python app.py
 gunicorn -c gunicorn_config.py app:app
 ```
 
-服务默认运行在 `http://0.0.0.0:8080`
+### 企微接入
 
-### 测试
-
-```bash
-curl -X POST http://localhost:8080/test/chat \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer your-api-token" \
-  -d '{"user_id": "test_001", "msg": "你好"}'
+配置好 `.env` 中的企微参数后，在企微管理后台设置回调URL：
 ```
-
-## 演示
-
-直接用浏览器打开 `demo.html` 即可体验：
-
-1. 打开 `demo.html`
-2. 在顶部配置栏填入服务器地址和 API Token
-3. 点击"连接测试"确认服务器可用
-4. 左侧选择预设场景，或直接在输入框对话
-
-功能：
-- 6个预设场景（正常咨询 / 异议处理 / 辱骂 / 信息纠正 / 退费 / 竞品对比）
-- 实时流式对话
-- 右侧面板显示线索分、信任度、对话阶段
-- 支持查看用户画像和线索评分
+http://你的服务器IP:8080/callback/wechat_work
+```
 
 ## 项目结构
 
 ```
 shengtu-Sales-agent/
 ├── README.md                       # 项目说明
-├── LICENSE                         # MIT许可证
+├── LICENSE                         # MIT许可证（商业使用需授权）
 ├── requirements.txt                # 依赖清单
-├── demo.html                       # 交互式演示（浏览器直接打开）
 ├── .gitignore                      # Git忽略规则
 └── server_backup/                  # 服务端代码
     ├── app.py                      # Flask主服务
@@ -194,11 +231,11 @@ shengtu-Sales-agent/
     ├── config/
     │   ├── config.example.yaml     # 配置文件模板
     │   ├── knowledge_base.yaml     # 知识库/话术库
-    │   ├── experiments.yaml        # A/B实验配置
     │   └── ...                     # 其他配置
     ├── code/
     │   ├── __init__.py
     │   ├── agent_core.py           # 核心调度
+    │   ├── wechat_work.py          # 企微自建应用接口
     │   ├── state_machine.py        # 状态机
     │   ├── intent_classifier.py    # 意图识别
     │   ├── trust_engine.py         # 信任引擎
@@ -228,26 +265,32 @@ sudo systemctl enable ai-agent
 sudo systemctl start ai-agent
 ```
 
-### Docker（待支持）
+### 健康检查
 
 ```bash
-docker build -t shengtu-agent .
-docker run -p 8080:8080 shengtu-agent
+curl http://localhost:8080/health
+```
+
+### 日志查看
+
+```bash
+journalctl -u ai-agent -f
 ```
 
 ## 监控
 
 - 健康检查：`GET /health`
 - LLM状态：熔断机制，连续失败3次自动切换模板模式
-- 错误告警：企业微信/钉钉推送
+- 错误告警：企微Webhook推送
 - 数据看板：`GET /api/dashboard`
 
 ## 许可证
 
-MIT License - 详见 [LICENSE](LICENSE)
+MIT License - 个人开发者所有，未经书面授权禁止商业使用。
+
+详见 [LICENSE](LICENSE)
 
 ## 联系方式
 
-- 项目维护：深圳龙二07网安天才
+- 开发者：YD-hacker
 - 问题反馈：GitHub Issues
-- 开发agent联系：3190569767@qq.com

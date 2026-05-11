@@ -1377,8 +1377,6 @@ async def process_message_stream(user_id, msg):
 
             # 重新计算 lead_score
 
-            from code.lead_scorer import calculate_lead_score
-
             new_score = calculate_lead_score(state)
 
             logger.info(f"[{user_id}] correct_info: 已重置行为信号, lead_score重算为{new_score}")
