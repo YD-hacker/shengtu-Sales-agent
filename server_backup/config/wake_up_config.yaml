@@ -1,0 +1,20 @@
+wake_up:
+  enabled: true
+  inactive_days: 3
+  cron: "0 10 * * *"
+  max_total_wakes: null
+  min_interval_days_first_phase: 2
+  min_interval_days_later_phase: 4
+  phase_threshold: 3
+  stop_on_failure: true
+  stop_on_explicit_reject: false
+  reject_weekly_interval: 7
+  templates:
+    default: "宝子，最近怎么样？我是小苏，上次咱们聊到一半，你还有兴趣转行网安/大数据吗？"
+    icebreak: "宝子，好久不见！咱们这的网安/大数据实训内推还在招人，感兴趣回我一下？"
+    qualify: "宝子，上次还没聊完你的学历和年龄，我这边有几个新的内推岗位，帮你看看合不合适？"
+    fee_show: "宝子，跟你提过的那个不就业不收费的实训，最近名额快满了，你考虑得怎么样了？"
+    invite: "宝子，之前说好来校区看看的，这周末正好有开放日，我给你留了位置，来不来？"
+    show_fee: "宝子，跟你提过的那个不就业不收费的实训，最近名额快满了，你考虑得怎么样了？"
+    report_info: "宝子，信息还没填完呢，填好我帮你安排实训和住宿。"
+    completed: "宝子，你之前报名的信息我都收到了，有什么新问题随时问我。"

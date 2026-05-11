@@ -1,0 +1,9 @@
+trial_follow_up:
+  enabled: true
+  questionnaire_hour: 18
+  questionnaire_minute: 30
+  second_invite_days: 3
+  mark_lost_days: 3
+  remind_before_hours: 2
+  questionnaire: "兄弟，今天试听感觉咋样？有任何问题都可以跟我说，咱们调整。"
+  no_show_follow_up: "兄弟，今天没看到你过来，是时间不方便吗？咱们可以改到周末。"

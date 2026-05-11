@@ -1,0 +1,45 @@
+# A/B测试实验配置
+# 每个实验定义: stage(触发阶段), trigger(触发意图), status, variants(变体及权重)
+
+experiments:
+  # 费用展示话术实验
+  fee_show_style:
+    stage: "show_fee"
+    trigger: "fee_intent"
+    status: "running"
+    description: "测试不同费用展示话术的转化率"
+    variants:
+      control:
+        weight: 50
+        template: ""  # 使用默认话术
+      transparent:
+        weight: 50
+        template: "我直接跟你说费用吧——实训本身不收费，收的是就业服务费，19600元。但注意，这钱是你入职拿到工资以后才付的，不是现在掏腰包。前两月分期才1毛钱/月，等于零风险。"
+
+  # 邀约话术实验
+  invite_style:
+    stage: "invite"
+    trigger: ""
+    status: "running"
+    description: "测试不同邀约话术的到访率"
+    variants:
+      control:
+        weight: 50
+        template: ""  # 使用默认话术
+      urgency:
+        weight: 50
+        template: "这周二新班开课，名额就剩两个了。你过来直接跟课试听，不用做任何决定。不方便的话周末也行，但名额不等人。"
+
+  # 开场白实验
+  icebreak_style:
+    stage: "icebreak"
+    trigger: ""
+    status: "paused"
+    description: "测试不同开场白的回复率"
+    variants:
+      control:
+        weight: 50
+        template: ""
+      direct:
+        weight: 50
+        template: "你好，我是小苏，做IT人才服务的。直说吧，我们帮零基础的人转行做网络安全和大数据，不就业不收费。你是想了解一下，还是已经有经验想直接内推？"
