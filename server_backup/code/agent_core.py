@@ -632,11 +632,25 @@ async def generate_llm_decision(user_state, intent, collected_slots,
 
 
 
-    # 第一步：检查是否需要工具调用
+    # 第一步：检查是否需要工具调用（消息分级：短消息/问候/简单意图跳过）
 
     tool_result = None
 
-    if TOOLS_AVAILABLE and _is_llm_available():
+    _skip_tool_intents = {"icebreak_greet", "confirm", "reject", "insult", "user_frustration", "off_topic"}
+
+    _should_try_tool = (
+
+        TOOLS_AVAILABLE
+
+        and _is_llm_available()
+
+        and len(msg) > 10  # 短消息跳过
+
+        and intent not in _skip_tool_intents  # 简单意图跳过
+
+    )
+
+    if _should_try_tool:
 
         try:
 
@@ -654,11 +668,47 @@ async def generate_llm_decision(user_state, intent, collected_slots,
 
             tool_reply = tool_reply.strip()
 
-            # 解析工具调用
+            # 解析工具调用（支持多种LLM输出格式）
+
+            import json as _json
+
+            import re as _re
+
+            # 提取JSON：支持普通JSON、代码块包裹的JSON
+
+            json_str = None
 
             if tool_reply.startswith("{") and '"tool"' in tool_reply:
 
-                import json as _json
+                json_str = tool_reply
+
+            elif "```json" in tool_reply:
+
+                match = _re.search(r'```json\s*(\{.*?\})\s*```', tool_reply, _re.DOTALL)
+
+                if match:
+
+                    json_str = match.group(1)
+
+            elif "```" in tool_reply:
+
+                match = _re.search(r'```\s*(\{.*?\})\s*```', tool_reply, _re.DOTALL)
+
+                if match:
+
+                    json_str = match.group(1)
+
+            elif "{" in tool_reply and '"tool"' in tool_reply:
+
+                # 从混合文本中提取JSON
+
+                match = _re.search(r'\{[^{}]*"tool"\s*:\s*"[^"]*"[^{}]*\}', tool_reply)
+
+                if match:
+
+                    json_str = match.group(0)
+
+            if json_str:
 
                 try:
 
@@ -1098,6 +1148,20 @@ async def process_message_stream(user_id, msg):
 
             insult_count = state["_insult_count"]
 
+            # 检测辱骂+拒绝双意图（如"滚，别烦我了"）
+
+            reject_keywords = ["别烦", "不要", "不用", "算了", "别找", "退订", "拉黑", "不要了"]
+
+            if any(kw in msg for kw in reject_keywords):
+
+                state["rejected"] = True
+
+                state["last_rejected_time"] = get_beijing_time().isoformat()
+
+                state["_reject_count"] = state.get("_reject_count", 0) + 1
+
+                logger.info(f"[{user_id}] 辱骂+拒绝双意图检测")
+
             logger.info(f"[{user_id}] 用户辱骂，第{insult_count}次")
 
             if insult_count >= 2:
@@ -1281,11 +1345,43 @@ async def process_message_stream(user_id, msg):
 
                     logger.debug(f"清除向量记忆失败: {e}")
 
-            # 重置痛��（用户可能之前说了假的痛点）
+            # 重置痛点（用户可能之前说了假的痛点）
 
             state["pain_points"] = []
 
-            logger.info(f"[{user_id}] correct_info: 已重置is_qualified、pain_points、向量记忆")
+            # 重置行为信号（防止基于虚假信息的 lead_score 虚高）
+
+            state["_slot_update_count"] = 0
+
+            state["_asked_fee"] = False
+
+            state["_asked_time_or_location"] = False
+
+            state["_confirm_count"] = 0
+
+            state["_expressed_intent"] = False
+
+            state["_urgency_detected"] = False
+
+            state["_confirmed_time"] = False
+
+            state["_objection_total"] = 0
+
+            # 清除所有异议计数
+
+            for key in list(state.keys()):
+
+                if key.startswith("_objection_") and key.endswith("_count"):
+
+                    state[key] = 0
+
+            # 重新计算 lead_score
+
+            from code.lead_scorer import calculate_lead_score
+
+            new_score = calculate_lead_score(state)
+
+            logger.info(f"[{user_id}] correct_info: 已重置行为信号, lead_score重算为{new_score}")
 
 
 

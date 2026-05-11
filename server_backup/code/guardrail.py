@@ -71,7 +71,7 @@ def classify_question_tier(msg: str, current_node: str, intent: str) -> str:
     """
     # 明确的业务意图 → 第一层
     if intent in ("confirm", "fee_intent", "correct_info", "user_frustration",
-                  "newbie", "experienced", "icebreak_greet", "normal", "reject"):
+                  "newbie", "experienced", "icebreak_greet", "normal", "reject", "insult"):
         return "layer1"
 
     # 异议意图 → 第一层
@@ -81,6 +81,11 @@ def classify_question_tier(msg: str, current_node: str, intent: str) -> str:
     # 痛点表达 → 第一层
     if intent == "express_pain":
         return "layer1"
+
+    # show_fee/invite/report_info 阶段的退费/隐私问题 → 第一层（当前阶段直接处理）
+    if current_node in ("show_fee", "invite", "report_info"):
+        if any(w in msg for w in ["退费", "退款", "退钱", "怎么退", "隐私", "个人信息", "合同"]):
+            return "layer1"
 
     # off_topic → 先检查是否为知识相关问题
     if intent == "off_topic":

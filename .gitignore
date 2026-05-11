@@ -16,6 +16,10 @@ build/
 .env.local
 .env.production
 
+# Config (contains API tokens)
+server_backup/config/config.yaml
+config/config.yaml
+
 # Logs
 *.log
 logs/

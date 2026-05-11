@@ -57,9 +57,11 @@ async def generate_variant(template, intent, state=None):
     if not variant:
         return ""
 
-    # 合规检查：变体必须通过硬检查
+    # 合规检查：变体必须通过硬检查（使用正确的阶段参数）
     from code.compliance_checker import hard_check
-    is_safe, safe_text = hard_check(variant, "icebreak", is_objection=False)
+    stage = _get_stage_for_intent(intent)
+    is_obj = intent.startswith("objection_")
+    is_safe, safe_text = hard_check(variant, stage, is_objection=is_obj)
     if not is_safe:
         logger.warning(f"话术变体合规检查未通过，已拦截: {variant[:50]}...")
         return ""

@@ -165,7 +165,12 @@ def should_end_conversation(state: dict, lead_score: int, conversation_rounds: i
     """判断是否应该终止对话，返回 (should_end, reason)"""
 
     # 硬上限：20轮对话必须终止（防止无限循环）
+    # 但如果正在报备阶段且有未完成信息，给额外机会
     if conversation_rounds >= 20:
+        current_node = state.get("current_node", "")
+        if current_node == "report_info" and not (state.get("name") and state.get("phone")):
+            if conversation_rounds < 25:
+                return False, ""  # 报备阶段给额外5轮
         return True, "对话轮次硬上限"
 
     # 10轮对话后没有任何槽位更新
@@ -286,6 +291,11 @@ def should_handoff_to_human(state: dict, lead_score: int, intent: str) -> tuple:
         obj_count = state.get(f"_{intent}_count", 0)
         if obj_count >= 3:
             return True, 2, f"同类型异议无法化解: {intent}"
+
+    # 总异议次数超限（跨类型累计）
+    total_objections = state.get("_objection_total", 0)
+    if total_objections >= 5:
+        return True, 2, f"总异议次数超限: {total_objections}"
 
     # 2次情绪挫败
     frustration_count = state.get("_frustration_count", 0)

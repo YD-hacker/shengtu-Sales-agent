@@ -245,9 +245,9 @@ def schedule_recovery(user_id, reason, state):
 
 
 def restore_pending_recoveries():
-    """启动时恢复未执行的挽回任务"""
+    """启动时恢复未执行的挽回任务（含去重检查）"""
     try:
-        from code.memory_manager import get_all_user_ids, load_state
+        from code.memory_manager import get_all_user_ids, load_state, save_state
         user_ids = get_all_user_ids()
         restored = 0
         for uid in user_ids:
@@ -263,16 +263,21 @@ def restore_pending_recoveries():
             try:
                 run_time = datetime.fromisoformat(run_time_str)
                 now = get_beijing_time()
+
+                # 去重：如果用户已完成或最近活跃，跳过
+                if st.get("current_node") == "completed":
+                    st.pop("_pending_recovery", None)
+                    save_state(uid, st)
+                    continue
+
                 if run_time > now:
                     # 任务还未到执行时间，重新调度
                     reason = pending.get("reason", "unknown")
-                    hook = pending.get("hook", "")
                     schedule_recovery(uid, reason, st)
                     restored += 1
                 else:
                     # 任务已过期，清除
                     st.pop("_pending_recovery", None)
-                    from code.memory_manager import save_state
                     save_state(uid, st)
             except Exception:
                 pass

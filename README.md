@@ -1,4 +1,4 @@
-# 盛图 Sales Agent - IT培训行业AI智能销售助手
+# 盛途 Sales Agent - IT培训行业AI智能销售助手
 
 > 基于大语言模型的智能销售对话系统，面向IT培训机构，完成从破冰到报备的全流程销售转化。
 
@@ -17,6 +17,9 @@
 - **向量记忆系统**：语义检索历史对话，提升上下文理解
 - **A/B测试框架**：支持话术实验，数据驱动优化
 - **人工协作机制**：高价值用户自动转人工，旁观提醒
+- **对话挽回引擎**：智能挽回策略，异步任务调度
+- **深度用户画像**：决策风格/经济压力/沟通风格多维分析
+- **工具调用能力**：LLM可查询用户信息、检查资格、匹配校区
 
 ## 技术架构
 
@@ -29,6 +32,8 @@
 │ 意图识别 │ 状态机   │ 信任引擎 │ 线索评分 │  合规检查       │
 ├──────────┼──────────┼──────────┼──────────┼─────────────────┤
 │ LLM决策  │ 异议处理 │ 记忆管理 │ 用户画像 │  护栏系统       │
+├──────────┼──────────┼──────────┼──────────┼─────────────────┤
+│ 工具调用 │ 挽回引擎 │ A/B测试  │ 人工协作 │  数据分析       │
 ├──────────┴──────────┴──────────┴──────────┴─────────────────┤
 │              豆包LLM (doubao-1-5-lite-32k)                   │
 └─────────────────────────────────────────────────────────────┘
@@ -39,29 +44,28 @@
 | 模块 | 功能 |
 |------|------|
 | `app.py` | Flask主服务，API路由、鉴权、限流 |
-| `code/agent_core.py` | 核心调度，15步完整处理流程 |
+| `code/agent_core.py` | 核心调度，消息处理主流程，工具调用集成 |
 | `code/state_machine.py` | 严格状态机 + 资格判定 + 信任门禁 |
-| `code/intent_classifier.py` | 双层意图识别（正则 + LLM） |
-| `code/trust_engine.py` | 信任计算引擎（每日衰减，门禁控制） |
+| `code/intent_classifier.py` | 双层意图识别（正则 + LLM），含辱骂检测 |
+| `code/trust_engine.py` | 信任计算引擎（每日衰减，门禁控制，防刷机制） |
 | `code/lead_scorer.py` | 线索评分引擎（S/A/B/C四级） |
+| `code/decision_engine.py` | 决策引擎（动态跳步、异议策略、对话终止） |
 | `code/memory_manager.py` | 用户状态持久化（每用户独立JSON） |
-| `code/memory_vector.py` | 向量记忆系统（语义检索） |
-| `code/user_profiler.py` | 深度用户画像（决策/沟通/经济） |
-| `code/objection_handler.py` | 动态异议处理（5步法） |
-| `code/recovery_engine.py` | 对话挽回引擎 |
+| `code/memory_vector.py` | 向量记忆系统（语义检索，用户隔离，原子持久化） |
+| `code/user_profiler.py` | 深度用户画像（决策/沟通/经济/情绪） |
+| `code/objection_handler.py` | 动态异议处理（5步法 + 画像融合） |
+| `code/recovery_engine.py` | 对话挽回引擎（持久化任务，重启恢复） |
 | `code/experiment_manager.py` | A/B测试管理 |
+| `code/auto_experiment.py` | 自动话术变体生成（含合规检查） |
 | `code/human_collaboration.py` | 人工协作机制 |
-| `code/compliance_checker.py` | 合规检查（红线词过滤） |
-| `code/guardrail.py` | 三层护栏系统 |
+| `code/compliance_checker.py` | 合规检查（红线词过滤，身份澄清豁免） |
+| `code/guardrail.py` | 三层护栏系统（核心/知识/无关） |
 | `code/model_router.py` | LLM路由与熔断 |
 | `code/content_generator.py` | 内容生成（案例匹配、共情话术） |
 | `code/conversation_analytics.py` | 对话分析与埋点 |
-| `code/decision_engine.py` | 决策引擎（跳步、异议策略） |
+| `code/analytics_dashboard.py` | 数据分析仪表盘（转化漏斗） |
 | `code/scheduler.py` | 任务调度器 |
-| `code/wake_up.py` | 沉睡用户唤醒 |
-| `code/channel_pusher.py` | 渠道推送（企微等） |
-| `code/error_monitor.py` | 错误监控与告警 |
-| `code/guardrail.py` | 三层护栏（核心/知识/无关） |
+| `code/tools.py` | 工具调用模块（用户查询/资格检查/校区匹配） |
 
 ## 关键机制
 
@@ -88,6 +92,16 @@ trust >= 70 → 可以 report_info/completed
 **绝对禁止**：包就业、100%就业、保就业、贷款、分期贷、助学贷、学历造假、轻松月入
 
 **阶段禁止**：培训、学费、上课、招生、老师、机构、一定、保证
+
+**豁免规则**：异议阶段可提"机构""培训"用于澄清；身份否定句式（"不是培训机构"）不受限
+
+### 安全机制
+
+- **辱骂检测**：识别脏话/辱骂，2次触发人工转接
+- **信任防刷**：每日加分上限15分，单动作类型上限10分
+- **对话硬上限**：20轮强制终止（报备阶段可延至25轮）
+- **LLM熔断**：连续失败3次自动切换模板模式
+- **模糊确认降级**："嗯""好的"等短回复不直接推进状态
 
 ## API接口
 
@@ -119,25 +133,12 @@ pip install -r requirements.txt
 
 ### 配置
 
-编辑 `config/config.yaml`：
+```bash
+# 复制配置模板
+cp server_backup/config/config.example.yaml server_backup/config/config.yaml
+cp server_backup/.env.example server_backup/.env
 
-```yaml
-system:
-  main_model: doubao-1-5-lite-32k-250115  # LLM模型
-  timeout: 25
-  max_tokens: 300
-
-api_auth:
-  enabled: true
-  tokens:
-    - your-api-token-here
-```
-
-创建 `.env` 文件：
-
-```
-DOUBAO_API_KEY=your-api-key
-DOUBAO_API_BASE=https://ark.cn-beijing.volces.com/api/v3
+# 编辑配置文件，填入实际的API Key和Token
 ```
 
 ### 启动
@@ -157,7 +158,7 @@ gunicorn -c gunicorn_config.py app:app
 ```bash
 curl -X POST http://localhost:8080/test/chat \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer your-token" \
+  -H "Authorization: Bearer your-api-token" \
   -d '{"user_id": "test_001", "msg": "你好"}'
 ```
 
@@ -165,65 +166,41 @@ curl -X POST http://localhost:8080/test/chat \
 
 ```
 shengtu-Sales-agent/
-├── app.py                      # Flask主服务
-├── gunicorn_config.py          # Gunicorn配置
-├── config/
-│   ├── config.yaml             # 主配置文件
-│   └── knowledge_base.yaml     # 知识库/话术库
-├── code/                       # 核心代码模块
-│   ├── __init__.py
-│   ├── agent_core.py           # 核心调度
-│   ├── state_machine.py        # 状态机
-│   ├── intent_classifier.py    # 意图识别
-│   ├── trust_engine.py         # 信任引擎
-│   ├── lead_scorer.py          # 线索评分
-│   ├── memory_manager.py       # 记忆管理
-│   ├── memory_vector.py        # 向量记忆
-│   ├── user_profiler.py        # 用户画像
-│   ├── objection_handler.py    # 异议处理
-│   ├── recovery_engine.py      # 对话挽回
-│   ├── experiment_manager.py   # A/B测试
-│   ├── human_collaboration.py  # 人工协作
-│   ├── compliance_checker.py   # 合规检查
-│   ├── guardrail.py            # 护栏系统
-│   ├── model_router.py         # LLM路由
-│   ├── content_generator.py    # 内容生成
-│   ├── conversation_analytics.py # 对话分析
-│   ├── decision_engine.py      # 决策引擎
-│   ├── scheduler.py            # 任务调度
-│   ├── wake_up.py              # 沉睡唤醒
-│   ├── channel_pusher.py       # 渠道推送
-│   ├── error_monitor.py        # 错误监控
-│   ├── info_extractor.py       # 信息提取
-│   ├── dynamic_redline.py      # 动态红线
-│   ├── trial_follow_up.py      # 试听跟进
-│   ├── tools.py                # 工具集
-│   ├── time_utils.py           # 时间工具
-│   └── stream_utils.py         # 流式工具
-├── data/                       # 数据目录
-│   └── users/                  # 用户数据（每用户独立JSON）
-├── file_repo/                  # 文件仓库
-├── requirements.txt            # 依赖清单
-└── README.md                   # 项目说明
-```
-
-## 对话示例
-
-```
-用户：你好
-小范：你好呀，我是小范，做IT人才服务4年了。讲真的，转行是个大事儿，我先了解下你的情况——学历是统招大专还是本科？哪年毕业？多大了？在哪个城市？
-
-用户：我大专毕业，在广州，25岁
-小范：好的，大专，25岁，广州的情况我记下了。再了解下——你哪年毕业的？想学网安还是大数据？
-
-用户：2022年毕业的，想学网安
-小范：你的基本情况我都了解了，马上给你匹配最近的校区。按你的情况，最近的校区在广州网安校区（海珠），过来实训免费住宿。
-
-用户：多少钱啊
-小范：（合规展示费用，强调"入职才付费"）
-
-用户：我再想想
-小范：（异议5步法：共情→探因→举证→重构→行动）
+├── README.md                       # 项目说明
+├── LICENSE                         # MIT许可证
+├── requirements.txt                # 依赖清单
+├── demo.py                         # 交互式演示脚本
+├── .gitignore                      # Git忽略规则
+└── server_backup/                  # 服务端代码
+    ├── app.py                      # Flask主服务
+    ├── gunicorn_config.py          # Gunicorn配置
+    ├── .env.example                # 环境变量模板
+    ├── ai-agent.service            # Systemd服务配置
+    ├── config/
+    │   ├── config.example.yaml     # 配置文件模板
+    │   ├── knowledge_base.yaml     # 知识库/话术库
+    │   ├── experiments.yaml        # A/B实验配置
+    │   └── ...                     # 其他配置
+    ├── code/
+    │   ├── __init__.py
+    │   ├── agent_core.py           # 核心调度
+    │   ├── state_machine.py        # 状态机
+    │   ├── intent_classifier.py    # 意图识别
+    │   ├── trust_engine.py         # 信任引擎
+    │   ├── lead_scorer.py          # 线索评分
+    │   ├── decision_engine.py      # 决策引擎
+    │   ├── memory_manager.py       # 记忆管理
+    │   ├── memory_vector.py        # 向量记忆
+    │   ├── user_profiler.py        # 用户画像
+    │   ├── objection_handler.py    # 异议处理
+    │   ├── recovery_engine.py      # 对话挽回
+    │   ├── tools.py                # 工具调用
+    │   ├── compliance_checker.py   # 合规检查
+    │   ├── guardrail.py            # 护栏系统
+    │   └── ...                     # 其他模块
+    ├── data/
+    │   └── users/                  # 用户数据
+    └── file_repo/                  # 文件仓库
 ```
 
 ## 部署
@@ -252,7 +229,7 @@ docker run -p 8080:8080 shengtu-agent
 
 ## 许可证
 
-私有项目，未经授权禁止使用。
+MIT License - 详见 [LICENSE](LICENSE)
 
 ## 联系方式
 

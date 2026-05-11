@@ -80,6 +80,10 @@ def hard_check(text, current_node, is_objection=False, is_template=False):
             # 异议阶段豁免"机构""培训"（需要正面回应质疑）
             if is_objection and w in ("机构", "培训"):
                 continue
+            # 身份澄清豁免：允许说"不是培训机构"等否定句式
+            if w in ("培训", "机构", "老师", "学校"):
+                if any(p in normalized for p in ["不是培训", "不是机构", "不是学校", "不是老师", "非培训", "非机构"]):
+                    continue
             if _normalize(w) in normalized:
                 return False, "说真的，实训不收费，就业了才涉及费用，合同里都写着。"
 

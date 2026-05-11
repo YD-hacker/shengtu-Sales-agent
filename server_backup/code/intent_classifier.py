@@ -37,8 +37,9 @@ INTENT_PRIORITY = {
 # ---- 正则快速匹配规则 ----
 REGEX_RULES = [
     # 辱骂/脏话（最高优先级）
+    # 注意：单字"草""操""滚"会误杀"草莓""操作""滚动"，必须用词组
     {
-        "pattern": r"(滚|他妈|你妈|卧槽|草|操|fuck|shit|sb|傻逼|煞笔|狗屁|放屁|混蛋|王八蛋|去死|垃圾|废物|骗[子砸]|骗子|忽悠|割韭菜|坑人)",
+        "pattern": r"(滚蛋|滚开|他妈的|你妈的|你妈|卧槽|我去你|尼玛|马勒|傻逼|煞笔|狗屁|放屁|混蛋|王八蛋|去死吧|fuck|shit|fuc[ku]|damn|bitch|asshole|你就是骗子|忽悠人|割韭菜|坑人的|你个垃圾|你个废物|你[是这]垃圾$|骗子[！!。.]?$|垃圾[！!。.]?$)",
         "intent": "insult",
         "confidence": 0.95,
     },
@@ -277,14 +278,19 @@ def classify(msg: str, current_state: str = "", collected_slots: dict = None) ->
     # 第一层：正则快速匹配
     regex_intent, regex_confidence = _regex_classify(msg)
 
-    # 模糊确认降级：短消息+confirm+关键阶段 → 降低置信度
+    # 模糊确认降级：短消息+confirm → 降低置信度
     # 防止"嗯""好的"等模糊回复导致状态自嗨式推进
-    if regex_intent == "confirm" and current_state in ("qualify", "icebreak"):
-        if len(msg) <= 3 and regex_confidence < 0.95:
-            # 非常短的确认词，在关键阶段不直接推进状态
+    # 在所有阶段生效，但 show_fee/invite/report_info 阶段阈值更宽松
+    if regex_intent == "confirm" and len(msg) <= 3 and regex_confidence < 0.95:
+        if current_state in ("qualify", "icebreak", "match_campus"):
+            # 关键阶段：严格降级
             regex_intent = "normal"
             regex_confidence = 0.5
             logger.info(f"  -> 模糊确认降级: confirm -> normal (state={current_state})")
+        elif current_state in ("show_fee", "invite"):
+            # 费用/邀约阶段：降低置信度但不改变意图
+            regex_confidence = 0.6
+            logger.info(f"  -> 模糊确认置信度降低: confirm confidence=0.6 (state={current_state})")
 
     # 如果正则置信度高，直接返回
     if regex_confidence >= 0.8:

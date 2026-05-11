@@ -1,0 +1,186 @@
+# 盛途Sales Agent 配置文件模板
+# 复制此文件为 config.yaml 并填入实际值
+
+analytics:
+  enabled: true
+  event_types:
+  - conversation_start
+  - intent_detected
+  - slot_update
+  - state_transition
+  - objection_handled
+  - pain_detected
+  - trust_changed
+  - compliance_block
+  - conversation_end
+  - llm_call
+  - human_handoff
+  - experiment_exposure
+  flush_interval_seconds: 60
+
+api_auth:
+  enabled: true
+  rate_limit:
+    enabled: true
+    max_requests_per_hour: 200
+    max_requests_per_minute: 30
+  tokens:
+  - your-api-token-here  # 替换为你的API Token
+
+decision_engine:
+  objection_escalation:
+    A_max_rounds: 4
+    B_max_rounds: 3
+    C_max_rounds: 2
+    S_max_rounds: 5
+  skip_thresholds:
+    extreme_intent_score: 90
+    high_intent_score: 80
+  termination:
+    consecutive_rejects: 3
+    low_value_low_trust_rounds: 5
+    no_slot_update_rounds: 10
+
+experiments:
+  enabled: true
+  min_samples_for_winner: 50
+
+human_collaboration:
+  enabled: true
+  observe_alert:
+    fee_intent_score_min: 60
+    lead_score_min: 80
+    stages:
+    - show_fee
+    - invite
+    - report_info
+  stale_timeout_hours: 48
+
+lead_scoring:
+  behavior:
+    confirm_intent: 5
+    fee_intent: 5
+    first_reply: 5
+    frustration_penalty: -2
+    info_provide: 5
+    pain_express: 3
+    question_ask: 2
+    reject_penalty: -3
+  grades:
+    A: 60
+    B: 40
+    C: 0
+    S: 80
+  intent:
+    confirm: 12
+    fee_intent: 15
+    objection_mild: 3
+    off_topic_penalty: -3
+    pain_express: 5
+    reject_penalty: -10
+    time_available: 8
+  profile:
+    age_22_28: 8
+    age_29_32: 5
+    city_match: 5
+    direction_match: 5
+    edu_tongzhao_benke: 10
+    edu_tongzhao_dazhuan: 5
+    grad_year_recent: 7
+  strategy:
+    A:
+      max_objection_rounds: 4
+      objection_mode: llm_standard
+      priority: medium
+      reimbursement_eligible: true
+      wake_up_interval_hours: 24
+    B:
+      max_objection_rounds: 3
+      objection_mode: template
+      priority: normal
+      reimbursement_eligible: false
+      wake_up_interval_hours: 48
+    C:
+      max_objection_rounds: 2
+      objection_mode: template
+      priority: low
+      reimbursement_eligible: false
+      wake_up_interval_hours: 72
+    S:
+      max_objection_rounds: 5
+      objection_mode: llm_personalized
+      priority: high
+      reimbursement_eligible: true
+      wake_up_interval_hours: 12
+
+persona: '你叫小范，26岁，江西赣州人，现居广州。大学学的计算机科学，毕业后在互联网公司做了3年产品经理，后来转到IT行业人才服务领域，已经4年了。'
+
+persona_constitution: '绝对诚信、客户优先、长期主义、价值前置、尊严底线、真诚沟通、差异化服务。'
+
+redline_fence:
+  early_forbidden_numbers:
+  - '19600'
+  - '25200'
+  - '3600'
+  - 免费实训
+  - 保薪资
+  global_forbidden:
+  - 包就业
+  - 100%就业
+  - 保就业
+  - 贷款
+  - 分期贷
+  - 助学贷
+  - 100%上岗
+  - 绝对保证
+  - 学历造假
+  - 学信网可查
+  - 不用考试
+  - 轻松月入
+  stage_forbidden:
+  - 培训
+  - 学费
+  - 上课
+  - 招生
+  - 老师
+  - 机构
+  - 一定
+  - 保证
+
+security:
+  alert_cooldown_seconds: 300
+  alert_enabled: true
+  llm_fallback_to_template_after_failures: 3
+  llm_recovery_check_interval_seconds: 60
+  log_pii_mask: true
+  max_msg_length: 2000
+  sanitize_user_id: true
+
+system:
+  backup_model: doubao-1-5-lite-32k-250115
+  image_model: doubao-1.5-vision-pro-250328
+  main_model: doubao-1-5-lite-32k-250115
+  max_tokens: 300
+  stream_timeout: 60
+  timeout: 25
+
+trust:
+  daily_decay: 2
+  initial: 50
+  max: 100
+  min: 0
+  penalties:
+    ignore_emotion: -3
+    irrelevant_reply: -5
+    pushy_sales: -5
+    repeated_question: -2
+  rewards:
+    disclose_risk: 5
+    empathy_confirm: 2
+    provide_value: 3
+    user_confirms: 3
+    user_shares_info: 10
+  thresholds:
+    qualify: 30
+    report: 70
+    show_fee: 50

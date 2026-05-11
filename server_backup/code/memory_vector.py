@@ -163,13 +163,12 @@ def get_user_memories(user_id, limit=10):
 
 
 def clear_user_memories(user_id):
-    """清除指定用户的所有向量记忆（用于信息纠正场景）"""
+    """清除指定用户的所有向量记忆（物理删除+索引清理）"""
     global _memories, _user_indices
     user_indices = _user_indices.get(user_id, [])
     if not user_indices:
         return 0
-    # 标记删除（不能直接删除，因为FAISS索引不支持删除）
-    # 将用户的记忆文本清空，后续检索时会跳过
+    # 标记删除（FAISS索引不支持单条删除，需要重建索引）
     count = 0
     for idx in user_indices:
         if idx < len(_memories) and _memories[idx]["user_id"] == user_id:
@@ -180,8 +179,49 @@ def clear_user_memories(user_id):
             count += 1
     # 清除用户索引
     _user_indices.pop(user_id, None)
+    # 异步触发索引重建（清理已删除条目）
+    try:
+        import threading
+        threading.Thread(target=_rebuild_index, daemon=True).start()
+    except Exception:
+        pass
     logger.info(f"已清除用户{user_id}的{count}条向量记忆")
     return count
+
+
+def _rebuild_index():
+    """重建FAISS索引，移除已清除的条目"""
+    global _memories, _index, _user_indices, _model_ready
+    if not _model_ready or _index is None:
+        return
+    try:
+        import faiss
+        import numpy as np
+        # 过滤出未清除的记忆
+        active_memories = [m for m in _memories if not m.get("metadata", {}).get("cleared")]
+        if len(active_memories) == len(_memories):
+            return  # 没有需要清理的
+        logger.info(f"重建向量索引: {len(_memories)} -> {len(active_memories)} 条")
+        # 重建索引
+        new_index = faiss.IndexFlatIP(384)
+        new_user_indices = {}
+        if active_memories:
+            texts = [m["text"] for m in active_memories]
+            embeddings = _model.encode(texts, show_progress_bar=False)
+            faiss.normalize_L2(embeddings)
+            new_index.add(embeddings)
+            for idx, m in enumerate(active_memories):
+                uid = m.get("user_id", "")
+                if uid not in new_user_indices:
+                    new_user_indices[uid] = []
+                new_user_indices[uid].append(idx)
+        _memories = active_memories
+        _index = new_index
+        _user_indices = new_user_indices
+        _save()
+        logger.info(f"向量索引重建完成: {_index.ntotal} 条")
+    except Exception as e:
+        logger.warning(f"向量索引重建失败: {e}")
 
 
 def get_stats():
