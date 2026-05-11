@@ -162,6 +162,21 @@ curl -X POST http://localhost:8080/test/chat \
   -d '{"user_id": "test_001", "msg": "你好"}'
 ```
 
+## 演示
+
+直接用浏览器打开 `demo.html` 即可体验：
+
+1. 打开 `demo.html`
+2. 在顶部配置栏填入服务器地址和 API Token
+3. 点击"连接测试"确认服务器可用
+4. 左侧选择预设场景，或直接在输入框对话
+
+功能：
+- 6个预设场景（正常咨询 / 异议处理 / 辱骂 / 信息纠正 / 退费 / 竞品对比）
+- 实时流式对话
+- 右侧面板显示线索分、信任度、对话阶段
+- 支持查看用户画像和线索评分
+
 ## 项目结构
 
 ```
@@ -169,7 +184,7 @@ shengtu-Sales-agent/
 ├── README.md                       # 项目说明
 ├── LICENSE                         # MIT许可证
 ├── requirements.txt                # 依赖清单
-├── demo.py                         # 交互式演示脚本
+├── demo.html                       # 交互式演示（浏览器直接打开）
 ├── .gitignore                      # Git忽略规则
 └── server_backup/                  # 服务端代码
     ├── app.py                      # Flask主服务
