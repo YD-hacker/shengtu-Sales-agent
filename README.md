@@ -256,5 +256,6 @@ docker run -p 8080:8080 shengtu-agent
 
 ## 联系方式
 
-- 项目维护：盛图科技
+- 项目维护：深圳龙二07网安天才
 - 问题反馈：GitHub Issues
+- 开发agent联系：3190569767@qq.com
