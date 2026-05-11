@@ -294,3 +294,5 @@ MIT License - 个人开发者所有，未经书面授权禁止商业使用。
 
 - 开发者：YD-hacker
 - 问题反馈：GitHub Issues
+- 项目维护：深圳龙二07网安天才
+- 开发agent联系：3190569767@qq.com
