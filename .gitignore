@@ -19,6 +19,8 @@ build/
 # Config (contains API tokens)
 server_backup/config/config.yaml
 config/config.yaml
+server_code/config.yaml
+server_code/knowledge_base.yaml
 
 # Logs
 *.log
@@ -54,3 +56,6 @@ askpass.vbs
 server_backup/data/users/
 server_backup/data/analytics/
 server_backup/data/last_active.json
+server_code/data/
+server_code/logs/
+server_code/*.log
