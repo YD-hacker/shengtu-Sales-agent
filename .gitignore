@@ -16,11 +16,8 @@ build/
 .env.local
 .env.production
 
-# Config (contains API tokens)
-server_backup/config/config.yaml
+# Config with secrets (config.example.yaml is tracked, config.yaml is not)
 config/config.yaml
-server_code/config.yaml
-server_code/knowledge_base.yaml
 
 # Logs
 *.log
@@ -36,26 +33,32 @@ logs/
 .DS_Store
 Thumbs.db
 
-# Data (user data, not for version control)
-server_backup/data/users/*.json
-data/users/*.json
+# User data (not for version control)
+data/users/
+data/analytics/
+data/redis/
+data/vector_memory/
+data/last_active.json
+data/logs/
+data/*.json
+!data/faq_knowledge.json
+
+# Backups and temp
 *.bak
 *.bak2
-
-# Temporary
-temp_grad.txt
 *.tmp
+temp_grad.txt
 
-# Sensitive files
-askpass.bat
-askpass.vbs
-*.bak
-*.bak2
+# File repo (runtime)
+file_repo/
 
-# User data
-server_backup/data/users/
-server_backup/data/analytics/
-server_backup/data/last_active.json
-server_code/data/
-server_code/logs/
-server_code/*.log
+# Documentation and reports (local only, not pushed)
+BUSINESS_AUDIT_AND_REDESIGN.md
+CODE_AUDIT_REPORT.md
+FINAL_AUDIT_BEFORE_LAUNCH.md
+POST_UPGRADE_DEPLOY.md
+UPGRADE_CHANGE_LOG.md
+*蓝图补全*.md
+*蒸馏架构*.md
+*压力测试*.md
+*共创方案*.md
