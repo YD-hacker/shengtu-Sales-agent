@@ -262,10 +262,14 @@ def get_next_state(current_state, state, intent, lead_grade="A"):
         if intent in ("confirm", "fee_intent"):
             target_state = "invite"
         elif intent == "objection_price":
-            # P1: 价格异议回退路径 - 推荐更便宜的方案
-            target_state = "match_campus"
-            state["_price_objection_fallback"] = True
-            logger.info("   价格异议回退到match_campus，推荐更便宜方案")
+            # P1: 价格异议回退路径 - 仅保障班用户可回退到match_campus
+            if state.get("is_qualified"):
+                target_state = "match_campus"
+                state["_price_objection_fallback"] = True
+                logger.info("   价格异议回退到match_campus，推荐更便宜方案")
+            else:
+                target_state = "show_fee"
+                logger.info("   非保障班用户价格异议，不回退到match_campus")
         elif intent.startswith("objection_"):
             target_state = "show_fee"
         else:
@@ -378,7 +382,7 @@ def generate_reply_instruction(old_state, new_state, state, intent, lead_score=5
         }
 
     # ---- 异议5步法（支持动态策略） ----
-    if intent.startswith("objection_"):
+    if intent.startswith("objection_") or intent == "competitive_inquiry":
         strategy = state.get("_objection_strategy", {})
         return _generate_objection_reply(intent, state, strategy)
 
@@ -407,7 +411,7 @@ def generate_reply_instruction(old_state, new_state, state, intent, lead_score=5
     # ---- qualify → match_campus ----
     if old_state == "qualify" and new_state == "match_campus":
         return {
-            "template": "你的基本情况我都了解了，马上给你匹配最近的校区。",
+            "template": "你的情况我了解了，我看看哪个校区适合你。",
             "rules": [], "forbidden": ["金额", "收费"]
         }
 
@@ -449,6 +453,9 @@ def generate_reply_instruction(old_state, new_state, state, intent, lead_score=5
                 f"{'，'.join(missing[:2])}方便说下吗？",
                 f"还需要了解下{'、'.join(missing[:2])}。",
                 f"还差{'、'.join(missing[:2])}，简单说下就行。",
+                f"你{'、'.join(missing[:2])}是？",
+                f"对了，{'、'.join(missing[:2])}还没跟我说呢。",
+                f"{'、'.join(missing[:2])}发我一下呗。",
             ]
             ask_text = ask_variants[ask_count % len(ask_variants)]
 
@@ -457,7 +464,7 @@ def generate_reply_instruction(old_state, new_state, state, intent, lead_score=5
                 "rules": [], "forbidden": ["金额", "收费", "校区"]
             }
         return {
-            "template": "你的基本情况我都了解了，马上给你匹配最近的校区。",
+            "template": "你的情况我都了解了，我看看哪个校区适合你。",
             "rules": [], "forbidden": ["金额"]
         }
 
@@ -474,7 +481,7 @@ def generate_reply_instruction(old_state, new_state, state, intent, lead_score=5
         meal_tip = KB.get("meal_disclosure",
             ["住宿我们全包，吃饭你自己解决哈——校区周边吃饭很方便，一顿十几块钱就能吃好。"])[0]
         return {
-            "template": f"按你的情况，最近的实训校区在{campus}，过来实训免费住宿。{cities_tip} {meal_tip}",
+            "template": f"你这个情况，{campus}那边挺合适的，过去的话住宿免费。{cities_tip} {meal_tip}",
             "rules": [], "forbidden": ["金额", "收费", "费用"]
         }
 
@@ -498,7 +505,7 @@ def generate_reply_instruction(old_state, new_state, state, intent, lead_score=5
     elif new_state == "invite":
         if state.get("_pre_assessment_pass"):
             template = KB.get("pre_assessment_pass",
-                ["评估通过了，你的技术水平符合我们的内推标准。接下来把报备信息填一下，我帮你匹配合作企业的在招岗位。"])[0]
+                ["评估通过了，你的技术完全够用。你把名字和电话发我，我帮你对接企业在招的岗位。"])[0]
             state.pop("_pre_assessment_pass", None)
         else:
             template = _get_personalized_invite(state, lead_score)
@@ -522,24 +529,14 @@ def generate_reply_instruction(old_state, new_state, state, intent, lead_score=5
 
     elif new_state == "report_info":
         return {
-            "template": (
-                "为了给你安排实训和住宿，麻烦你填一下以下信息发给我：\n"
-                "姓名：\n性别：\n学历：\n毕业时间：\n专业：\n沟通岗位：\n"
-                "联系电话：\n出发城市：\n实训基地：\n到达时间：\n是否需要住宿：\n其他备注："
-            ),
+            "template": KB.get("report_info_conversational",
+                ["你把名字和电话发我，我帮你登记下，到时候安排住宿也方便。"])[0],
             "rules": [], "forbidden": []
         }
 
     elif new_state == "completed":
-        reemployment = KB.get("reemployment_guarantee",
-            ["签约后2年内，如果你因非自身原因被裁，凭公司离职证明回来，我们免费重新帮你推荐就业，薪资标准不变。"])[0]
-        grace = KB.get("payment_grace_period",
-            ["如果被裁时分期还没付完，可以申请最长30天的付费延期——等你找到新工作、拿到工资后再恢复。"])[0]
-        salary_fallback = KB.get("salary_shortfall_guarantee",
-            ["如果推荐岗位的实际薪资没达到承诺的最低标准，我们会继续帮你推荐，直到薪资达标为止。"])[0]
         return {"template": KB.get("completed",
-            ["你的信息我都收到了，我们会尽快安排。有什么问题随时找我。"])[0]
-            + f" {reemployment} {grace} {salary_fallback}",
+            ["收到，我这边帮你安排，有消息第一时间跟你说。"])[0],
             "rules": [], "forbidden": []}
 
     return {"template": KB["default"][0], "rules": [], "forbidden": []}
@@ -587,7 +584,8 @@ def _get_personalized_invite(state, lead_score):
     city = state.get("city", "")
     pain_points = state.get("pain_points", [])
 
-    base = "这周二新班开课，你过来直接跟课试听。名额还有两个，定吗？不方便的话周末也行。"
+    base = KB.get("invite_with_plan",
+        ["这周二新班开课，你过来直接跟课试听。我先帮你占个位，定这周二还是周末？"])[0]
 
     # 高信任用户：加车费报销
     if trust >= 70:
@@ -673,6 +671,13 @@ def _generate_objection_reply(intent, state, strategy=None):
                 "evidence": "这个钱不是学费，是就业服务费——你入职拿到工资了才付。而且有两种方式，可以分期。",
                 "reframe": "不是你花19600买一份工作，是你先拿到工作再付钱。哪个风险大？",
                 "action": "费用细节来校区我给你看合同，一目了然。这周末方便来吗？"
+            },
+            "competitive_inquiry": {
+                "empathy": "你对比一下是好事，买东西都要货比三家。",
+                "probe": "你最关心哪方面？费用、就业、还是教学质量？",
+                "evidence": "我建议你重点比三个方面：是不是就业后才收费、有没有保障协议、合作企业有多少。我们光北上广深杭就有300多家合作企业。",
+                "reframe": "关键是看谁跟你利益绑在一起——我们不就业不收钱，这个逻辑你想想就明白了。",
+                "action": "你来校区实地看看，跟在学的学员聊几句，比看一百条网评都管用。"
             }
         }
 

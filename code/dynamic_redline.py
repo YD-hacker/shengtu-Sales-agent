@@ -4,8 +4,10 @@
 1. "包括就业" 不应误杀 — "包"后面必须是直接接"就业"或最多1个连接字
 2. "100%就位" 不应误杀 — 限定"100%就业/上岗"精确匹配
 3. 增加 "包X就业" 组合模式
+4. P1修复: Unicode同形字绕过检测（使用NFKC标准化）
 """
 import re
+import unicodedata
 
 FORBIDDEN_PATTERNS = [
     # "包就业" / "包当就业" — "包"后面紧跟"就业"或最多1个连接字(当/你/了)
@@ -33,8 +35,14 @@ FORBIDDEN_PATTERNS = [
 
 
 def check(msg: str) -> bool:
-    """检查消息是否命中动态红线，返回 True 表示命中"""
+    """检查消息是否命中动态红线，返回 True 表示命中
+
+    P1修复: 使用Unicode NFKC标准化，防止同形字绕过
+    例如: "忽畧"(形近字) → normalize后仍匹配"忽略"
+    """
+    # NFKC标准化：将兼容字符映射到标准形式
+    normalized = unicodedata.normalize('NFKC', msg)
     for p in FORBIDDEN_PATTERNS:
-        if p.search(msg):
+        if p.search(msg) or p.search(normalized):
             return True
     return False

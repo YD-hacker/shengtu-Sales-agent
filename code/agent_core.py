@@ -67,6 +67,7 @@ from code.memory_manager import load_state, save_state, add_history, get_history
 from code.compliance_checker import hard_check
 
 from code.intent_classifier import classify
+from code.conversation_rhythm import humanize_output, inject_hook
 
 from code.info_extractor import extract_entities, extract_report_info
 
@@ -607,75 +608,45 @@ def build_decision_prompt(user_state, intent, collected_slots,
     if question_marks >= 2:
         multi_q_hint = "\n注意：用户消息中有多个问题，请逐一回答，不要遗漏任何问题。"
 
+    # 阶段策略（告诉LLM要达成什么目标，而不是说什么话）
+    stage_strategy = {
+        "icebreak": "目标：建立连接，判断用户是零基础转行还是有经验想内推。问一个开放性问题让用户开口。",
+        "qualify": f"目标：收集用户基础信息。已收集：{collected_str}。还缺：{missing_str}。每次最多问2个缺失项，先复述已知信息再追问。不要像审问，要像聊天。",
+        "match_campus": "目标：告诉用户有合适的校区，提及免费住宿。用'你这个情况，XX那边挺合适'的语气，不要说'为您匹配'。",
+    }.get(current_node, "根据当前情况自然回复。")
+
     prompt = f"""{constitution}
-
-
 
 {persona}
 
-
-
 【当前情况】
-
 - 对话阶段：{current_node}（{stage_desc}）
-
 - 用户意图：{intent}
-
 - 已收集信息：{profile_str}
-
-- 已收集字段：{collected_str}
-
-- 未收集字段：{missing_str}
-
 - 用户痛点：{pain_str}
-
 - 线索等级：{lead_score}（{"S级高价值" if lead_score >= 80 else "A级" if lead_score >= 60 else "B级" if lead_score >= 40 else "C级"}）
-
 - 信任度：{trust}（{trust_desc}）
 {memory_block}{profile_block}{multi_q_hint}
 【最近对话】
-
 {history_str}
 
-
-
 【用户最新消息】
-
 {msg}
 
+【你的策略】
+{stage_strategy}
 
-
-【你的任务】
-
-你现在就是小范本人，像真人销售一样思考和回复。
-
-
-
-回复要求：
-
-1. 先理解用户的真实意图和情绪
-
-2. 根据当前阶段选择合适的策略
-
-3. 如果用户有痛点，先共情再引导
-
-4. 如果用户问了无关问题，礼貌拉回主线
-
-5. 每次回复都要提供新价值（案例、资讯、建议）
-
-6. 不要重复之前说过的话
-
-7. 控制在100字以内，口语化表达
-
-8. 可以适当使用表情符号增加亲和力
-
-
+【回复规则】
+1. 你就是小范本人，像朋友聊天一样回复，不要像客服
+2. 如果用户有痛点，先共情再引导，不要上来就推销
+3. 不要重复之前说过的话，每次提供新信息
+4. 控制在100字以内，口语化，可以说"讲真的""你想想看"
+5. 如果有历史记忆，自然地引用（"上次你说..."），不要生硬
+6. 不要出现"为您""系统""匹配"等机器感词汇
 
 绝对不能出现的词：培训、学费、上课、招生、老师、机构、保证、一定、包就业
 
-
-
-直接输出你的回复，不要加任何前缀或解释："""
+直接输出你的回复："""
 
 
 
@@ -1281,8 +1252,6 @@ async def process_message_stream(user_id, msg):
 
                 # 2次辱骂，转人工
 
-                from code.human_collaboration import build_handoff_context, format_handoff_message
-
                 context = build_handoff_context(state, new_lead_score)
 
                 handoff_msg = format_handoff_message(context)
@@ -1625,11 +1594,11 @@ async def process_message_stream(user_id, msg):
 
             save_state(user_id, state)
 
-            for char in final_text:
-
-                yield char
-
-                await asyncio.sleep(0.02)
+            _obj = intent.startswith("objection_") if 'intent' in dir() else False
+            final_text = inject_hook(final_text, new_state or old_state, state)
+            async for chunk in humanize_output(final_text, new_state or old_state, _obj, intent):
+                if chunk:
+                    yield chunk
 
             add_history(user_id, msg, final_text)
             _store_vector_memory(user_id, msg, final_text, state)
@@ -1676,11 +1645,16 @@ async def process_message_stream(user_id, msg):
 
 
 
-            reply = get_layer3_reply(old_state, state)
+            reply = get_layer3_reply(old_state, state, msg)
 
             adjust_trust(state, "irrelevant_reply", "用户问了无关问题")
 
-
+            # P1修复: Layer3回复也必须通过合规检查
+            ok, reply = hard_check(reply, old_state, is_objection=False)
+            if not ok:
+                log_compliance_block(user_id, old_state, reply[:100], "global_forbidden")
+            if dynamic_check(reply):
+                reply = "有些话我不方便线上说，周末来校区我当面给你讲清楚。"
 
             friday = state.pop("_append_friday_greeting", None)
 
@@ -1692,7 +1666,11 @@ async def process_message_stream(user_id, msg):
 
             save_state(user_id, state)
 
-            yield reply
+            # P1修复: Layer3回复也经过人性化处理
+            reply = inject_hook(reply, old_state, state)
+            async for chunk in humanize_output(reply, old_state, False, intent):
+                if chunk:
+                    yield chunk
 
             add_history(user_id, msg, reply)
             _store_vector_memory(user_id, msg, reply, state)
@@ -1768,7 +1746,15 @@ async def process_message_stream(user_id, msg):
 
         # ---- 状态跳转（动态流程控制） ----
 
-        skip_target = should_skip_steps(state, new_lead_score, intent)
+        # 行动信号快速通道：用户主动表达行动意向时，跳过中间步骤
+        ACTION_SIGNALS = ["去看看", "去试试", "周末去", "明天去", "过去看看", "报名", "怎么报名", "定了", "就这个", "就它了"]
+        has_action_signal = any(signal in msg for signal in ACTION_SIGNALS)
+        if has_action_signal and old_state in ("match_campus", "show_fee", "qualify"):
+            logger.info(f"[{user_id}] 行动信号检测: {msg[:30]}，快速跳转到invite")
+            new_state = "invite"
+            skip_target = None  # 已经处理，跳过后续跳步逻辑
+        else:
+            skip_target = should_skip_steps(state, new_lead_score, intent)
 
         if skip_target:
 
@@ -1902,11 +1888,11 @@ async def process_message_stream(user_id, msg):
 
                             save_state(user_id, state)
 
-                            for char in final_text:
-
-                                yield char
-
-                                await asyncio.sleep(0.02)
+                            _obj = intent.startswith("objection_") if 'intent' in dir() else False
+                            final_text = inject_hook(final_text, new_state or old_state, state)
+                            async for chunk in humanize_output(final_text, new_state or old_state, _obj, intent):
+                                if chunk:
+                                    yield chunk
 
                             add_history(user_id, msg, final_text)
                             _store_vector_memory(user_id, msg, final_text, state)
@@ -1976,7 +1962,8 @@ async def process_message_stream(user_id, msg):
 
         if intent == "express_pain":
 
-            pain_tag = new_pains[-1] if new_pains else state.get("pain_points", ["none"])[-1]
+            pain_points_list = state.get("pain_points", [])
+            pain_tag = new_pains[-1] if new_pains else (pain_points_list[-1] if pain_points_list else "none")
 
 
 
@@ -2048,11 +2035,11 @@ async def process_message_stream(user_id, msg):
 
             save_state(user_id, state)
 
-            for char in final_text:
-
-                yield char
-
-                await asyncio.sleep(0.02)
+            _obj = intent.startswith("objection_") if 'intent' in dir() else False
+            final_text = inject_hook(final_text, new_state or old_state, state)
+            async for chunk in humanize_output(final_text, new_state or old_state, _obj, intent):
+                if chunk:
+                    yield chunk
 
             add_history(user_id, msg, final_text)
             _store_vector_memory(user_id, msg, final_text, state)
@@ -2116,19 +2103,9 @@ async def process_message_stream(user_id, msg):
 
         if old_state == "invite" and intent == "confirm":
 
-            confirm_msg = "好的，那咱们就说定了，你把下面信息填一下，我帮你安排实训和住宿。"
+            confirm_msg = "好的，那咱们就说定了。你把名字和电话发我，我帮你安排住宿。"
 
-            template = (
-
-                "为了给你安排实训和住宿，麻烦你填一下以下信息发给我：\n"
-
-                "姓名：\n性别：\n学历：\n毕业时间：\n专业：\n沟通岗位：\n"
-
-                "联系电话：\n出发城市：\n实训基地：\n到达时间：\n是否需要住宿：\n其他备注："
-
-            )
-
-            full_reply = confirm_msg + "\n" + template
+            full_reply = confirm_msg
 
 
 
@@ -2272,7 +2249,7 @@ async def process_message_stream(user_id, msg):
 
                     missing_fields.append("联系电话")
 
-                prompt_text = f"还差{'、'.join(missing_fields)}，麻烦补一下。"
+                prompt_text = f"还差{'、'.join(missing_fields)}，你发我一下。"
 
                 yield prompt_text
 
@@ -2301,7 +2278,7 @@ async def process_message_stream(user_id, msg):
 
             is_objection = intent.startswith("objection_")
 
-            ok, final_text = hard_check(template, new_state, is_objection=is_objection)
+            ok, final_text = hard_check(template, new_state, is_objection=is_objection, is_template=True)
 
 
 
@@ -2325,11 +2302,11 @@ async def process_message_stream(user_id, msg):
 
             save_state(user_id, state)
 
-            for char in final_text:
-
-                yield char
-
-                await asyncio.sleep(0.02)
+            _obj = intent.startswith("objection_") if 'intent' in dir() else False
+            final_text = inject_hook(final_text, new_state or old_state, state)
+            async for chunk in humanize_output(final_text, new_state or old_state, _obj, intent):
+                if chunk:
+                    yield chunk
 
             add_history(user_id, msg, final_text)
             _store_vector_memory(user_id, msg, final_text, state)
@@ -2392,11 +2369,11 @@ async def process_message_stream(user_id, msg):
 
                 save_state(user_id, state)
 
-                for char in final_text:
-
-                    yield char
-
-                    await asyncio.sleep(0.02)
+                _obj = intent.startswith("objection_") if 'intent' in dir() else False
+                final_text = inject_hook(final_text, new_state or old_state, state)
+                async for chunk in humanize_output(final_text, new_state or old_state, _obj, intent):
+                    if chunk:
+                        yield chunk
 
                 add_history(user_id, msg, final_text)
                 _store_vector_memory(user_id, msg, final_text, state)
@@ -2571,11 +2548,10 @@ async def process_message_stream(user_id, msg):
 
 
 
-        for char in final_text:
-
-            yield char
-
-            await asyncio.sleep(0.02)
+        _node = state.get("current_node", "icebreak") if state else "icebreak"
+        async for chunk in humanize_output(final_text, _node, False, intent):
+            if chunk:
+                yield chunk
 
 
 
