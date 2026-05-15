@@ -62,3 +62,10 @@ UPGRADE_CHANGE_LOG.md
 *蒸馏架构*.md
 *压力测试*.md
 *共创方案*.md
+
+# Audit reports (session-specific, regenerated per audit)
+audit_*.md
+AGENT_FULL_AUDIT.md
+FINAL_AUDIT_2026.md
+tests/TEST_REPORT.md
+tests/scenario_test_report.json

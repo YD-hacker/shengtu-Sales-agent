@@ -12,6 +12,8 @@ _cached_time_offset = None
 _last_sync_ts = 0
 _SYNC_INTERVAL = 60
 _time_lock = threading.Lock()
+_consecutive_failures = 0
+_MAX_FAILURES_BEFORE_SKIP = 3  # 连续失败3次后跳过网络请求，避免日志刷屏
 
 
 def _fetch_network_time():
@@ -38,14 +40,20 @@ def get_beijing_time() -> datetime:
     """
     global _cached_time_offset, _last_sync_ts
 
+    global _consecutive_failures
     now_ts = time.time()
     # 加锁防止并发竞态
     with _time_lock:
-        if _cached_time_offset is None or (now_ts - _last_sync_ts) > _SYNC_INTERVAL:
-            offset = _fetch_network_time()
-            if offset is not None:
-                _cached_time_offset = offset
-                _last_sync_ts = now_ts
+        # ISSUE-003: 连续失败多次后跳过网络请求，避免日志刷屏
+        if _consecutive_failures < _MAX_FAILURES_BEFORE_SKIP:
+            if _cached_time_offset is None or (now_ts - _last_sync_ts) > _SYNC_INTERVAL:
+                offset = _fetch_network_time()
+                if offset is not None:
+                    _cached_time_offset = offset
+                    _last_sync_ts = now_ts
+                    _consecutive_failures = 0
+                else:
+                    _consecutive_failures += 1
 
     local_beijing = datetime.now(timezone.utc).astimezone(BEIJING_TZ)
     if _cached_time_offset is not None:

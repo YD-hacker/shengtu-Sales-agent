@@ -56,7 +56,7 @@ KNOWLEDGE_ADJACENT_PATTERNS = [
 LAYER2_RULES = [
     "绝对不能承诺就业率、薪资具体数字",
     "绝对不能说'包就业''保证就业'等违规词",
-    "不能贬低竞争对手（不提竞品名字，只说'传统培训机构'）",
+    "提到竞品时可以中性提及名字，但不能贬低，只说自己的优势",
     "回答必须基于事实，不确定的要说'具体你可以来校区了解'",
     "回答后必须自然过渡到业务主线",
     "退费相关：强调'不就业不收费'的合同条款，引导来校区看合同原文，不承诺具体退费比例",
@@ -79,9 +79,9 @@ def classify_question_tier(msg: str, current_node: str, intent: str) -> str:
     if intent.startswith("objection_"):
         return "layer1"
 
-    # 竞品对比 → 第二层（知识回答）
+    # 竞品对比 → 第一层（使用KB模板处理）
     if intent == "competitive_inquiry":
-        return "layer2"
+        return "layer1"
 
     # 痛点表达 → 第一层
     if intent == "express_pain":
@@ -159,8 +159,8 @@ def get_layer3_reply(current_node: str, state: dict, msg: str = "") -> str:
         if any(w in msg_lower for w in ["投诉", "举报", "维权"]):
             return "很抱歉给你带来了不好的体验，我们非常重视每一位学员的感受。你方便来校区当面聊聊吗？我一定给你一个满意的答复。"
 
-    base = "这个我确实不太擅长聊😅"
-    return f"{base} {hint}"
+    base = "这个我也不太确定"
+    return f"{base}，{hint}"
 
 
 def _build_info_summary(state: dict) -> str:

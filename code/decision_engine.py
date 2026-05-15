@@ -166,9 +166,10 @@ def should_end_conversation(state: dict, lead_score: int, conversation_rounds: i
 
     P1优化: 轮次上限按线索等级动态调整
     - S级(>=80): 40轮
-    - A级(>=60): 30轮
-    - B/C级(<60): 20轮
+    - A级(>=60): 35轮
+    - B/C级(<60): 25轮
     - 达上限前5轮自然植入"小结推进"话术
+    - 若所有核心槽位已填满，额外+5轮缓冲
     """
     from datetime import datetime
 
@@ -176,9 +177,18 @@ def should_end_conversation(state: dict, lead_score: int, conversation_rounds: i
     if lead_score >= 80:
         max_rounds = 40
     elif lead_score >= 60:
-        max_rounds = 30
+        max_rounds = 35
     else:
-        max_rounds = 20
+        max_rounds = 25
+
+    # 槽位已满时额外缓冲：用户信息齐全但状态未推进，给更多耐心
+    from code.state_machine import REGULAR_SLOTS
+    all_slots_filled = all(
+        isinstance(state.get(k), str) and state.get(k).strip()
+        for k in REGULAR_SLOTS
+    )
+    if all_slots_filled:
+        max_rounds += 5
 
     # 标记：接近上限时植入小结推进话术
     rounds_remaining = max_rounds - conversation_rounds
